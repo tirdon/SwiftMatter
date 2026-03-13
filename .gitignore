@@ -1,0 +1,11 @@
+# Ignore an entire directory named 'build/'
+build/**
+
+managed_components/**
+
+.chache/**
+
+sdkconfig
+
+dependencies.lock
+
