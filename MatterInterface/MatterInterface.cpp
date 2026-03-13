@@ -10,6 +10,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "BridgingHeader.h"
+#include "esp_err.h"
+#include "esp_matter_attribute_utils.h"
 #include "portmacro.h"
 
 esp_err_t esp_matter::attribute::set_callback_shim(callback_t_shim callback) {
@@ -24,8 +26,8 @@ esp_matter::attribute_t *esp_matter::attribute::get_shim(esp_matter::cluster_t *
   return get(cluster, (uint32_t)attribute_id);
 }
 
-esp_matter::attribute_t *esp_matter::attribute::get_shim(unsigned short endpoint_id, unsigned int cluster_id, unsigned int attribute_id) {
-  return get(endpoint_id, (uint32_t)cluster_id, (uint32_t)attribute_id);
+esp_err_t esp_matter::attribute::get_val_shim(unsigned short endpoint_id, unsigned int cluster_id, unsigned int attribute_id, esp_matter_attr_val_t *val) {
+  return get_val(endpoint_id, (uint32_t)cluster_id, (uint32_t)attribute_id, (esp_matter_attr_val_t *) val);
 }
 
 void recomissionFabric() {
@@ -41,4 +43,8 @@ void recomissionFabric() {
 esp_err_t esp_matter::attribute::update_shim(uint16_t endpoint_id, unsigned int cluster_id, unsigned int attribute_id,
                    esp_matter_attr_val_t *val) {
   return update(endpoint_id, (uint32_t)cluster_id, (uint32_t)attribute_id, val);
+}
+
+esp_err_t esp_matter::attribute::report_shim(unsigned short endpoint_id, unsigned int cluster_id, unsigned int attribute_id, esp_matter_attr_val_t* val) {
+  return report((uint16_t) endpoint_id, (uint32_t) cluster_id, (uint32_t)attribute_id, (esp_matter_attr_val_t *)val);
 }

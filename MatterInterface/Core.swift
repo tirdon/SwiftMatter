@@ -1,6 +1,5 @@
 // Core.swift
 
-
 protocol MatterNode { var node: UnsafeMutablePointer<esp_matter.node_t> { get } }
 
 // ====================================================
@@ -30,7 +29,7 @@ protocol MatterConcreteEndpoint: MatterEndpoint {
 
 protocol MatterCluster {
     var cluster: UnsafeMutablePointer<esp_matter.cluster_t> { get }
-    init(cluster: UnsafeMutablePointer<esp_matter.cluster_t> )
+    init(cluster: UnsafeMutablePointer<esp_matter.cluster_t>)
 }
 
 extension MatterCluster {
@@ -47,7 +46,7 @@ protocol MatterConcreteCluster: MatterCluster {
 
 extension MatterConcreteCluster {
     func attribute<Attribute: MatterAttribute>(_ id: AttributeID<Attribute>) -> Attribute {
-        Attribute(attribute: esp_matter.attribute.get_shim(cluster , id.rawValue))
+        Attribute(attribute: esp_matter.attribute.get_shim(cluster, id.rawValue))
     }
 }
 
@@ -55,7 +54,7 @@ extension MatterConcreteCluster {
 
 protocol MatterAttribute {
     var attribute: UnsafeMutablePointer<esp_matter.attribute_t> { get }
-    init(attribute: UnsafeMutablePointer<esp_matter.attribute_t> )
+    init(attribute: UnsafeMutablePointer<esp_matter.attribute_t>)
 }
 
 extension MatterAttribute {
@@ -80,10 +79,10 @@ enum MatterAttributeEventType: esp_matter.attribute.callback_type_t.RawValue {
 
     var description: StaticString {
         switch self {
-            case .willSet: "willSet: Pre-Update"
-            case .didSet: "didSet: Post-Update"
-            case .read: "read"
-            case .write: "write"
+        case .willSet: "willSet: Pre-Update"
+        case .didSet: "didSet: Post-Update"
+        case .read: "read"
+        case .write: "write"
         }
     }
 }
@@ -101,7 +100,6 @@ enum MatterAttributeEventType: esp_matter.attribute.callback_type_t.RawValue {
 protocol GPIO {
     var enabled: Bool { get set }
 }
-
 
 // MARK: - Root Node
 // ====================================================
@@ -137,46 +135,47 @@ struct RootNode: MatterNode {
         identify: @escaping IdentifyCallback
     ) {
         var nodeConfig = esp_matter.node.config_t()
-    esp_matter.attribute.set_callback_shim {
-        type, endpoint, cluster, attribute, value, context in
-        guard let context else {
+        esp_matter.attribute.set_callback_shim {
+            type, endpoint, cluster, attribute, value, context in
+
+            guard let context else { return ESP_OK }
+            guard let e = Endpoint(id: endpoint) else { return ESP_OK }
+            guard let c = Cluster(endpoint: e, cluster: cluster) else { return ESP_OK }
+            guard let event = MatterAttributeEventType(rawValue: type.rawValue) else {
+                fatalError("Unknown event type")
+            }
+            let ctx = Unmanaged<Context>.fromOpaque(context).takeUnretainedValue()
+            ctx.attribute(event, e, c, attribute, value)
             return ESP_OK
         }
-        guard let e = Endpoint(id: endpoint) else { return ESP_OK }
-        guard let c = Cluster(endpoint: e, cluster: cluster) else { return ESP_OK }
-        guard let event = MatterAttributeEventType(rawValue: type.rawValue) else {
-            fatalError("Unknown event type")
-        }
-        let ctx = Unmanaged<Context>.fromOpaque(context).takeUnretainedValue()
-        ctx.attribute(event, e, c, attribute, value)
-        return ESP_OK
-    }
-    esp_matter.identification.set_callback {
-        type, endpoint, effect, variant, context in
-        guard let context else { fatalError("context must be non-nil") }
-        Unmanaged<Context>.fromOpaque(context).takeUnretainedValue().identify(
-            type, endpoint, effect, variant)
-        return ESP_OK
-    }
-    guard let node = esp_matter.node.create_raw() else {
-        return nil
-    }
+        esp_matter.identification.set_callback {
+            type, endpoint, effect, variant, context in
 
-    name.withCString { name in
-        let length = strnlen(name, Int(esp_matter.cluster.basic_information.k_max_node_label_length))
-        withUnsafeMutablePointer(to: &nodeConfig.root_node.basic_information) { ptr in  
-            _ = strncpy(ptr, name, length)
+            guard let context else { fatalError("context must be non-nil") }
+            Unmanaged<Context>.fromOpaque(context).takeUnretainedValue().identify(
+                type, endpoint, effect, variant)
+            return ESP_OK
         }
-    }
 
-    let context = Context(attribute: attribute, identify: identify)
-    withUnsafeMutablePointer(to: &nodeConfig.root_node) {
-        // Transfer ownership to the node. This is a leak for now, but we don't expect nodes to be created and destroyed repeatedly.
-        _ = esp_matter.endpoint.root_node.create(
-            node, $0, UInt8(esp_matter.ENDPOINT_FLAG_NONE.rawValue), Unmanaged.passRetained(context).toOpaque())
-    }
-    self.node = node
-    self.context = context
+        guard let node = esp_matter.node.create_raw() else { return nil }
+
+        name.withCString { name in
+            let length = strnlen(
+                name, Int(esp_matter.cluster.basic_information.k_max_node_label_length))
+            withUnsafeMutablePointer(to: &nodeConfig.root_node.basic_information) { ptr in
+                _ = strncpy(ptr, name, length)
+            }
+        }
+
+        let context = Context(attribute: attribute, identify: identify)
+        withUnsafeMutablePointer(to: &nodeConfig.root_node) {
+            // Transfer ownership to the node. This is a leak for now, but we don't expect nodes to be created and destroyed repeatedly.
+            _ = esp_matter.endpoint.root_node.create(
+                node, $0, UInt8(esp_matter.ENDPOINT_FLAG_NONE.rawValue),
+                Unmanaged.passRetained(context).toOpaque())
+        }
+        self.node = node
+        self.context = context
     }
 
     var endpoint: Endpoint {
@@ -202,16 +201,16 @@ struct Endpoint: MatterEndpoint {
 
     func `as`<T: MatterConcreteEndpoint>(_ type: T.Type) -> T? {
         let expected = T.deviceTypeId
-            let count = esp_matter.endpoint.get_device_type_count(endpoint)
-            for i in 0..<count {
-                var deviceTypeId: UInt32 = 0
-                var deviceTypeVersion: UInt8 = 0
-                let err = esp_matter.endpoint.get_device_type_at_index(
-                    endpoint, i, &deviceTypeId, &deviceTypeVersion)
-                if err == ESP_OK && deviceTypeId == expected {
-                    return T(endpoint)
-                }
+        let count = esp_matter.endpoint.get_device_type_count(endpoint)
+        for i in 0..<count {
+            var deviceTypeId: UInt32 = 0
+            var deviceTypeVersion: UInt8 = 0
+            let err = esp_matter.endpoint.get_device_type_at_index(
+                endpoint, i, &deviceTypeId, &deviceTypeVersion)
+            if err == ESP_OK && deviceTypeId == expected {
+                return T(endpoint)
             }
+        }
         return nil
     }
 }
@@ -245,14 +244,12 @@ struct Attribute: MatterAttribute {
     }
 }
 
-
 // ====================================================
-
 
 func print(_ a: Matter.Endpoint.Attribute) {
     switch a {
-        case .onOff: print("onOff")
-        case .dht22update: print("DHT22 updated attributes")
-        case .unknown(let id): print("unknown attribute id: \(id)")
+    case .onOff: print("onOff")
+    case .dht22update: print("DHT22 updated attributes")
+    case .unknown(let id): print("unknown attribute id: \(id)")
     }
 }

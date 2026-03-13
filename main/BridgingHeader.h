@@ -31,7 +31,7 @@
 #include <device.h>
 #include <driver/gpio.h>
 #include <driver/adc.h>
-#include <driver/rmt_rx.h>
+#include <driver/rmt_rx.h> // rx = receive, tx = transmit
 #include <driver/rmt_tx.h>
 // #include <driver/rmt.h>
 #include <iot_button.h>

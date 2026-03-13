@@ -12,6 +12,8 @@
 // GNU C++ interfaces do not work well with Swift for certain types, so let's use some simple C++ shims.
 // For example, uint32_t gets imported as UInt and not CUnsignedLong (as defined in ESP IDF).
 
+#include "esp_err.h"
+#include "esp_matter_attribute_utils.h"
 #include "esp_matter_data_model.h"
 namespace esp_matter {
   namespace attribute {
@@ -26,7 +28,8 @@ namespace esp_matter {
 
   namespace attribute {
     attribute_t *get_shim(cluster_t *cluster, unsigned int attribute_id);
-    attribute_t *get_shim(unsigned short, unsigned int, unsigned int);
+    esp_err_t get_val_shim(unsigned short endpoint_id, unsigned int cluster_id, unsigned int attribute_id, esp_matter_attr_val_t *val);
+    esp_err_t report_shim(unsigned short endpoint_id, unsigned int cluster_id, unsigned int attribute_id, esp_matter_attr_val_t* val);
   }
 
   

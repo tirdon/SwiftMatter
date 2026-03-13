@@ -1,3 +1,4 @@
+//MARK: - LED
 final class LED: GPIO {
     var enabled: Bool = false {
         didSet {
@@ -19,21 +20,14 @@ final class LED: GPIO {
     }
 }
 
+//MARK: - Button
 final class Button {
     private let id: UInt16
     private let led: LED
 
-    func update() {
-
-        var att_dataType: esp_matter_attr_val_t = esp_matter_bool(!led.enabled)
-
-        _ = esp_matter.attribute.update_shim(
-            UInt16(self.id),
-            UInt32(chip.app.Clusters.OnOff.Id),
-            UInt32(chip.app.Clusters.OnOff.Attributes.OnOff.Id),
-            &att_dataType
-        )
-    }
+    var buttonConfig = button_config_t()
+    var buttonGpioConfig = button_gpio_config_t()
+    var buttonHandle: button_handle_t? = nil
 
     init(endpoint id: UInt16, led: LED) {
         self.id = id
@@ -54,13 +48,20 @@ final class Button {
         _ = Unmanaged.passRetained(self)
     }
 
-    var buttonConfig = button_config_t()
+    func update() {
 
-    var buttonGpioConfig = button_gpio_config_t()
+        var att_dataType: esp_matter_attr_val_t = esp_matter_bool(!led.enabled)
 
-    var buttonHandle: button_handle_t? = nil
+        _ = esp_matter.attribute.update_shim(
+            UInt16(self.id),
+            UInt32(chip.app.Clusters.OnOff.Id),
+            UInt32(chip.app.Clusters.OnOff.Attributes.OnOff.Id),
+            &att_dataType
+        )
+    }
 }
 
+//MARK: - DHT22
 final class DHT22Sensor {
     let gpio = GPIO_NUM_4
     var temperature: Float = 0.0
@@ -88,76 +89,78 @@ final class DHT22Sensor {
     static let dht_rx_task: @convention(c) (UnsafeMutableRawPointer?) -> Void = { param in
         print("task started")
         guard let param else { return }
-        let dht = Unmanaged<DHT22Sensor>.fromOpaque(param).takeUnretainedValue()
+        let dht = Unmanaged<DHT22Sensor>.fromOpaque(param).takeRetainedValue()
         var saved_state_humi: Float = 0.0
         var saved_state_temp: Float = 0.0
         while true {
             let res = dht_read_float_data(
                 DHT_TYPE_AM2301, dht.gpio, &dht.humidity, &dht.temperature)
 
-            if res == ESP_OK && (dht.humidity != saved_state_humi
-                || dht.temperature != saved_state_temp)
+            if res == ESP_OK
+                && (dht.humidity != saved_state_humi
+                    || dht.temperature != saved_state_temp)
             {
-                print("Humidity: \(dht.humidity)  Temp: \(dht.temperature)\n")
+                // print("Humidity: \(dht.humidity)  Temp: \(dht.temperature)\n")
                 saved_state_humi = dht.humidity
                 saved_state_temp = dht.temperature
 
-                dht.update_temp(val: Int16(saved_state_temp * 100))
-                dht.update_humidity(val: UInt16(saved_state_humi * 100))
+                dht.update_temp()
+                dht.update_humidity()
 
-            } else if dht.humidity != saved_state_humi && dht.temperature != saved_state_temp {
-                print("Fail but, Humidity: \(dht.humidity)  Temp: \(dht.temperature)\n")
-                // saved_state_humi = dht.humidity
-                // saved_state_temp = dht.temperature
             } else {
                 // print("Humidity: \(dht.humidity)  Temp: \(dht.temperature)\n")
-                // print("Could not read data from sensor: \(res.description)\n")
+                // print("Could not read data from sensor: \(res)\n")
             }
-            vTaskDelay(10000 / UInt32(configTICK_RATE_HZ))
-            // vTaskDelay(1000)
+            vTaskDelay(100_000 / UInt32(configTICK_RATE_HZ))
         }
     }
 
-    func update_temp(val: Int16) {
-        var att_dataType: esp_matter_attr_val_t = esp_matter_int16(val)
-        _ = esp_matter.attribute.update_shim(
+    func update_temp() {
+
+        var att_dataType: esp_matter_attr_val_t = esp_matter_nullable_int16(
+            .init(Int16(self.temperature * 100.0)))
+        let err = esp_matter.attribute.report_shim(
             UInt16(self.temperatureId),
             UInt32(chip.app.Clusters.TemperatureMeasurement.Id),
             UInt32(chip.app.Clusters.TemperatureMeasurement.Attributes.MeasuredValue.Id),
             &att_dataType
         )
+        if err != ESP_OK { print("update_temp failed: \(err)") }
     }
 
-    func update_humidity(val: UInt16) {
-        var att_dataType: esp_matter_attr_val_t = esp_matter_uint16(val)
-        _ = esp_matter.attribute.update_shim(
+    func update_humidity() {
+        var att_dataType: esp_matter_attr_val_t = esp_matter_nullable_uint16(
+            .init(UInt16(self.humidity * 100.0)))
+        let err = esp_matter.attribute.report_shim(
             UInt16(self.humidityId),
             UInt32(chip.app.Clusters.RelativeHumidityMeasurement.Id),
             UInt32(chip.app.Clusters.RelativeHumidityMeasurement.Attributes.MeasuredValue.Id),
             &att_dataType
         )
+        if err != ESP_OK { print("update_temp failed: \(err)") }
     }
 }
 
+//MARK: - IR
 final class IRSensor {
 
     init() {  // rmt_init
 
     }
 
-}
-// rx = receive, tx = transmit
-let ir_rx_task: @convention(c) (UnsafeMutableRawPointer?) -> Void = { _ in
-    print("IR Task started, waiting for signals...")
-    var recv_cfg = rmt_receive_config_t()
-    recv_cfg.signal_range_min_ns = 1_250
-    recv_cfg.signal_range_max_ns = 12_000_000
+    static let ir_rx_task: @convention(c) (UnsafeMutableRawPointer?) -> Void = { _ in
+        print("IR Task started, waiting for signals...")
+        var recv_cfg = rmt_receive_config_t()
+        recv_cfg.signal_range_min_ns = 1_250
+        recv_cfg.signal_range_max_ns = 12_000_000
 
-    // rmt_receive(rx_chan, raw_symbols, MemoryLayout<raw_symbols>.stride, &recv_cfg)
+        // rmt_receive(rx_chan, raw_symbols, MemoryLayout<raw_symbols>.stride, &recv_cfg)
 
-    while true {
-        let evt = rmt_rx_done_event_data_t()
-        // if (xQueueReceive(valve.button_queue, &att_dataType, portMAX_DELAY) == pdPASS) {
-        // }
+        while true {
+            let evt = rmt_rx_done_event_data_t()
+            // if (xQueueReceive(valve.button_queue, &att_dataType, portMAX_DELAY) == pdPASS) {
+            // }
+        }
     }
+
 }
