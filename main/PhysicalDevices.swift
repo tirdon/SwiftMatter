@@ -3,7 +3,7 @@ final class LED: GPIO {
     var enabled: Bool = false {
         didSet {
             gpio_set_level(GPIO_NUM_10, enabled ? 1 : 0)
-            gpio_set_level(GPIO_NUM_9, enabled ? 1 : 0)
+            // gpio_set_level(GPIO_NUM_9, enabled ? 1 : 0)
         }
     }
 
@@ -12,9 +12,9 @@ final class LED: GPIO {
         gpio_set_direction(GPIO_NUM_10, GPIO_MODE_OUTPUT)
         gpio_set_level(GPIO_NUM_10, 0)
 
-        gpio_reset_pin(GPIO_NUM_9)
-        gpio_set_direction(GPIO_NUM_9, GPIO_MODE_OUTPUT)
-        gpio_set_level(GPIO_NUM_9, 0)
+        // gpio_reset_pin(GPIO_NUM_9)
+        // gpio_set_direction(GPIO_NUM_9, GPIO_MODE_OUTPUT)
+        // gpio_set_level(GPIO_NUM_9, 0)
 
         _ = Unmanaged.passRetained(self)
     }
@@ -63,12 +63,12 @@ final class Button {
 
 //MARK: - DHT22
 final class DHT22Sensor {
-    let gpio = GPIO_NUM_4
-    var temperature: Float = 0.0
-    var humidity: Float = 0.0
+    private let gpio = GPIO_NUM_4
+    private var temperature: Float = 0.0
+    private var humidity: Float = 0.0
 
-    let humidityId: UInt16
-    let temperatureId: UInt16
+    private let humidityId: UInt16
+    private let temperatureId: UInt16
 
     init(humidityEndpoint h_id: UInt16, temperatureEndpoint t_id: UInt16) {
 
@@ -111,7 +111,7 @@ final class DHT22Sensor {
                 // print("Humidity: \(dht.humidity)  Temp: \(dht.temperature)\n")
                 // print("Could not read data from sensor: \(res)\n")
             }
-            vTaskDelay(100_000 / UInt32(configTICK_RATE_HZ))
+            vTaskDelay(1_000_000 * UInt32(configTICK_RATE_HZ) / 1000)
         }
     }
 
@@ -142,24 +142,188 @@ final class DHT22Sensor {
 }
 
 //MARK: - IR
+enum NecResult {
+    case frame(UInt32)  // Full 32-bit NEC frame decoded
+    case repeatCode     // Repeat burst (button held)
+}
+
 final class IRSensor {
+    private let gpio: gpio_num_t = GPIO_NUM_0
+    // private let endpointId: UInt16
+    // private let led: LED
+    var taskHandle: TaskHandle_t? = nil
 
-    init() {  // rmt_init
+    // GPIO ISR: fires on falling edge, notifies the IR task
+    private static let gpioISR: gpio_isr_t = { arg in
+        guard let arg else { return }
+        let ir = Unmanaged<IRSensor>.fromOpaque(arg).takeUnretainedValue()
+        guard let handle = ir.taskHandle else { return }
 
+        // Disable interrupt until the task re-enables it after decoding
+        gpio_intr_disable(ir.gpio)
+
+        var xHigherPriorityTaskWoken: Int32 = 0
+        vTaskNotifyGiveFromISR_shim(handle, &xHigherPriorityTaskWoken)
+        portYIELD_FROM_ISR_shim(xHigherPriorityTaskWoken)
     }
 
-    static let ir_rx_task: @convention(c) (UnsafeMutableRawPointer?) -> Void = { _ in
-        print("IR Task started, waiting for signals...")
-        var recv_cfg = rmt_receive_config_t()
-        recv_cfg.signal_range_min_ns = 1_250
-        recv_cfg.signal_range_max_ns = 12_000_000
+    init() {
+        gpio_reset_pin(gpio)
+        gpio_set_direction(gpio, GPIO_MODE_INPUT)
+        gpio_pullup_en(gpio)
+        gpio_set_intr_type(gpio, GPIO_INTR_NEGEDGE)
 
-        // rmt_receive(rx_chan, raw_symbols, MemoryLayout<raw_symbols>.stride, &recv_cfg)
+        // Install GPIO ISR service and attach handler
+        gpio_install_isr_service(0)
+        gpio_isr_handler_add(gpio, IRSensor.gpioISR, Unmanaged.passUnretained(self).toOpaque())
+        gpio_intr_disable(gpio)  // Will be enabled once the task is ready
+
+        _ = Unmanaged.passRetained(self)
+    }
+
+    // private func setSwitchState(_ enabled: Bool) {
+    //     var att_dataType: esp_matter_attr_val_t = esp_matter_bool(enabled)
+    //     let err = esp_matter.attribute.update_shim(
+    //         endpointId,
+    //         UInt32(chip.app.Clusters.OnOff.Id),
+    //         UInt32(chip.app.Clusters.OnOff.Attributes.OnOff.Id),
+    //         &att_dataType
+    //     )
+
+    //     if err != ESP_OK { print("ir update failed: \(err)") }
+    // }
+
+    private func handleCommand(frame: UInt32, isRepeat: Bool = false) {
+        let address = UInt8(frame & 0xFF)  // identifies the specific device
+        let command = UInt8((frame >> 16) & 0xFF)  // identifies the command
+
+        if !isRepeat {
+            print(
+                "IR TSOP38238: frame=0x\(String(frame, radix: 16)) address=0x\(String(address, radix: 16)) command=0x\(String(command, radix: 16))"
+            )
+        }
+
+        switch command {
+        case 0x1:  // Common NEC "Power" key
+            // let nextState = !led.enabled
+            // setSwitchState(nextState)
+            // print("IR TSOP38238: POWER command -> switch \(nextState ? \"ON\" : \"OFF\")")
+            print("IR TSOP38238: POWER command -> switch ON/OFF.\(isRepeat ? " (repeat)" : "")")
+        default:
+            print("IR TSOP38238: unhandled command 0x\(String(command, radix: 16))\(isRepeat ? " (repeat)" : "")")
+        }
+    }
+
+    private static func readPulse(level: Int32, gpio: gpio_num_t, timeoutUs: Int64 = 20_000)
+        -> Int64
+    {
+        let start = esp_timer_get_time()
+        while gpio_get_level(gpio) == level {
+            if esp_timer_get_time() - start > timeoutUs { return -1 }
+        }
+        return esp_timer_get_time() - start
+    }
+
+    private static func decodeNecFrame(gpio: gpio_num_t) -> NecResult? {
+        let leadingLow = readPulse(level: 0, gpio: gpio)
+        if leadingLow < 8_500 || leadingLow > 9_500 { return nil }
+
+        let leadingHigh = readPulse(level: 1, gpio: gpio)
+
+        // Repeat code: 9ms LOW + 2.25ms HIGH (instead of 4.5ms)
+        if leadingHigh >= 2_000 && leadingHigh <= 2_800 {
+            // Wait for the trailing 562µs LOW burst to finish
+            _ = readPulse(level: 0, gpio: gpio)
+            return .repeatCode
+        }
+
+        // Full frame: 9ms LOW + 4.5ms HIGH
+        if leadingHigh < 4_000 || leadingHigh > 5_000 { return nil }
+
+        var code: UInt32 = 0
+        for bit in 0..<32 {
+            let low = readPulse(level: 0, gpio: gpio)
+            if low < 400 || low > 800 { return nil }
+
+            let high = readPulse(level: 1, gpio: gpio)
+            if high > 1_200 {
+                code |= (UInt32(1) << UInt32(bit))
+            }
+        }
+
+        return .frame(code)
+    }
+
+    private static func isValidNec(_ frame: UInt32) -> Bool {
+        let address = UInt8(frame & 0xFF)
+        let addressInv = UInt8((frame >> 8) & 0xFF)
+        let command = UInt8((frame >> 16) & 0xFF)
+        let commandInv = UInt8((frame >> 24) & 0xFF)
+
+        return (address ^ addressInv) == 0xFF && (command ^ commandInv) == 0xFF
+    }
+
+    static let ir_rx_task: @convention(c) (UnsafeMutableRawPointer?) -> Void = { param in
+        print("IR Task started, waiting for signals...")
+
+        guard let param else { return }
+        let ir = Unmanaged<IRSensor>.fromOpaque(param).takeRetainedValue()
+
+        // Store our own task handle so the ISR can notify us
+        ir.taskHandle = xTaskGetCurrentTaskHandle()
+        print("TSOP38238 receiver task started (ISR + notify mode).")
+
+        var lastFrame: UInt32? = nil
+        var lastSignalTime: Int64 = 0
+        let repeatTimeoutUs: Int64 = 200_000  // 200ms
+
+        // Enable the GPIO interrupt now that we're ready to receive
+        gpio_intr_enable(ir.gpio)
 
         while true {
-            let evt = rmt_rx_done_event_data_t()
-            // if (xQueueReceive(valve.button_queue, &att_dataType, portMAX_DELAY) == pdPASS) {
-            // }
+            // Block until the ISR wakes us (falling edge on IR pin)
+            // Timeout after 300ms to clear stale lastFrame
+            let notified = ulTaskNotifyTake_shim(1, 300 * UInt32(configTICK_RATE_HZ) / 1000)
+
+            if notified == 0 {
+                // Timeout — no IR activity, clear stale state
+                lastFrame = nil
+                gpio_intr_enable(ir.gpio)
+                continue
+            }
+
+            // ISR disabled the interrupt for us; decode the NEC frame via bit-banging
+            guard let result = decodeNecFrame(gpio: ir.gpio) else {
+                gpio_intr_enable(ir.gpio)
+                continue
+            }
+
+            let now = esp_timer_get_time()
+
+            switch result {
+            case .frame(let frame):
+                guard isValidNec(frame) else {
+                    gpio_intr_enable(ir.gpio)
+                    continue
+                }
+                lastFrame = frame
+                lastSignalTime = now
+                ir.handleCommand(frame: frame)
+
+            case .repeatCode:
+                if let frame = lastFrame,
+                   (now - lastSignalTime) < repeatTimeoutUs
+                {
+                    lastSignalTime = now
+                    ir.handleCommand(frame: frame, isRepeat: true)
+                } else {
+                    lastFrame = nil
+                }
+            }
+
+            // Short debounce, then re-enable interrupt for next signal
+            vTaskDelay(50 * UInt32(configTICK_RATE_HZ) / 1000)
+            gpio_intr_enable(ir.gpio)
         }
     }
 

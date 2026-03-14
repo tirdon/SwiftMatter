@@ -10,17 +10,18 @@ An ESP32-C3/C6 irrigation controller built entirely in **Embedded Swift**, using
 - **Humidity Sensor Endpoint** — reports DHT22 relative humidity (% × 100) via Matter `RelativeHumidityMeasurement` cluster
 - **Physical Button** — GPIO 21 button toggles the switch state and reports back to the Matter fabric
 - **Onboard LED** — GPIO 8 status LED indicates Wi-Fi connectivity
-- **IR Receiver** (stub) — RMT-based IR receive task, ready for future expansion
+- **IR Receiver (NEC)** — TSOP38238 on GPIO 0, full NEC protocol decode with hold/repeat support, low-power ISR + `ulTaskNotifyTake` pattern (zero CPU usage while idle)
 
 ## Hardware
 
 | Component | GPIO | Notes |
 |-----------|------|-------|
 | LED / Relay A | 10 | Active high |
-| LED / Relay B | 9 | Active high |
+| LED / Relay B | 9 | Active high (currently commented out) |
 | Onboard Status LED | 8 | Active low (on = Wi-Fi disconnected) |
 | Push Button | 21 | Active high, 10 ms debounce, 2 s long press |
 | DHT22 (AM2301) | 4 | Open-drain, temperature + humidity |
+| IR Receiver (TSOP38238) | 0 | Input with pull-up, NEC protocol, ISR on falling edge |
 
 ## Project Structure
 
@@ -52,28 +53,33 @@ Irrigation/
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    Main.swift                        │
-│            app_main() → Never                        │
-│                                                      │
-│  ┌──────────┐  ┌─────────────┐  ┌────────────────┐  │
-│  │   LED    │  │   Button    │  │  DHT22Sensor   │  │
-│  │ GPIO 9,10│  │  GPIO 21    │  │    GPIO 4      │  │
-│  └────┬─────┘  └──────┬──────┘  └──────┬─────────┘  │
-│       │               │               │             │
-│  ┌────▼───────────────▼───────────────▼──────────┐  │
-│  │              Matter.Node                       │  │
-│  │  ┌──────────────┬───────────┬───────────────┐  │  │
-│  │  │ SwitchEndpt  │ TempEndpt │  HumidEndpt   │  │  │
-│  │  │  (OnOff)     │ (DHT22)  │   (DHT22)     │  │  │
-│  │  └──────────────┴───────────┴───────────────┘  │  │
-│  └──────────────────┬────────────────────────────┘  │
-│                     │                                │
-│  ┌──────────────────▼────────────────────────────┐  │
-│  │           Matter.Application                   │  │
-│  │      esp_matter.start() → Wi-Fi → Fabric       │  │
-│  └────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                      Main.swift                           │
+│              app_main() → Never                           │
+│                                                           │
+│  ┌──────────┐  ┌─────────┐  ┌────────────┐  ┌─────────┐ │
+│  │   LED    │  │ Button  │  │ DHT22Sensor│  │IRSensor │ │
+│  │ GPIO 10  │  │ GPIO 21 │  │   GPIO 4   │  │ GPIO 0  │ │
+│  └────┬─────┘  └────┬────┘  └─────┬──────┘  └────┬────┘ │
+│       │             │             │               │      │
+│       │             │         FreeRTOS task    GPIO ISR + │
+│       │             │        (dht_rx_task)   ulTaskNotify │
+│       │             │         polls every    (ir_rx_task) │
+│       │             │           ~1000s        blocks till │
+│       │             │                        falling edge│
+│  ┌────▼─────────────▼─────────────▼───────────────▼───┐  │
+│  │                   Matter.Node                      │  │
+│  │  ┌──────────────┬───────────┬───────────────┐      │  │
+│  │  │ SwitchEndpt  │ TempEndpt │  HumidEndpt   │      │  │
+│  │  │  (OnOff)     │ (DHT22)  │   (DHT22)     │      │  │
+│  │  └──────────────┴───────────┴───────────────┘      │  │
+│  └───────────────────────┬────────────────────────────┘  │
+│                          │                               │
+│  ┌───────────────────────▼────────────────────────────┐  │
+│  │              Matter.Application                    │  │
+│  │         esp_matter.start() → Wi-Fi → Fabric        │  │
+│  └────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ## Prerequisites
@@ -139,6 +145,50 @@ The C++ ESP-Matter SDK doesn't import cleanly into Swift due to type mismatches 
 - `update_shim` — attribute value updates
 - `report_shim` — attribute reporting to the Matter fabric (for sensor value pushes)
 - `get_val_shim` — attribute value retrieval by endpoint/cluster/attribute ID
+
+### FreeRTOS Shims
+
+FreeRTOS task notification APIs (`ulTaskNotifyTake`, `vTaskNotifyGiveFromISR`, `portYIELD_FROM_ISR`) are C macros that Swift cannot import. The following `extern "C"` wrapper functions are provided:
+
+| Swift Function | Wraps |
+|---|---|
+| `ulTaskNotifyTake_shim(clearOnExit, ticks)` | `ulTaskNotifyTake` — blocks task until notified or timeout |
+| `vTaskNotifyGiveFromISR_shim(handle, &woken)` | `vTaskNotifyGiveFromISR` — sends notification from ISR context |
+| `portYIELD_FROM_ISR_shim(woken)` | `portYIELD_FROM_ISR` — triggers context switch if higher-priority task was woken |
+
+## IR Receiver (NEC Protocol)
+
+The IR subsystem uses a **TSOP38238** module on GPIO 0 to decode standard NEC infrared remote signals.
+
+### How it works
+
+```
+Remote button press:
+  TSOP38238 pulls GPIO 0 LOW → GPIO ISR fires (falling edge)
+    → ISR disables interrupt, sends task notification
+      → ir_rx_task wakes from ulTaskNotifyTake_shim()
+        → Bit-bang NEC decode (readPulse timing)
+          → handleCommand() dispatches action
+            → 50ms debounce → re-enable interrupt → sleep again
+```
+
+### NEC Frame Format
+
+| Field | Bits | Duration |
+|-------|------|----------|
+| AGC Leader | — | 9ms LOW + 4.5ms HIGH |
+| Address | 8 | LSB first |
+| Address (inverted) | 8 | Error check |
+| Command | 8 | LSB first |
+| Command (inverted) | 8 | Error check |
+| **Repeat code** | — | 9ms LOW + 2.25ms HIGH (button held) |
+
+### Low-Power Design
+
+The IR task uses a **GPIO ISR + `ulTaskNotifyTake`** pattern instead of busy-polling:
+- **Idle**: task is blocked (zero CPU usage), other tasks (Matter, DHT22) run normally
+- **Signal**: hardware interrupt wakes the task instantly on falling edge
+- **Timeout**: after 300ms of no activity, stale repeat state is cleared
 
 ## License
 

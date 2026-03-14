@@ -32,12 +32,13 @@ func main() -> Never {
 	rootNode.addEndpoint(humidityEndpoint)
 	rootNode.addEndpoint(temperatureEndpoint)
 
-	let app = Matter.Application()
-	app.rootNode = rootNode
-	app.start()
-
 	xTaskCreate(
 		DHT22Sensor.dht_rx_task, "dht_rx_task", 4096, Unmanaged.passRetained(dht).toOpaque(), 4,
+		nil)
+
+	let ir = IRSensor()
+	xTaskCreate(
+		IRSensor.ir_rx_task, "ir_rx_task", 4096, Unmanaged.passRetained(ir).toOpaque(), 4,
 		nil)
 
 	iot_button_new_gpio_device(&button.buttonConfig, &button.buttonGpioConfig, &button.buttonHandle)
@@ -51,6 +52,10 @@ func main() -> Never {
 			print("button is pressed.")
 
 		}, Unmanaged.passUnretained(button).toOpaque())
+
+	let app = Matter.Application()
+	app.rootNode = rootNode
+	app.start()
 
 	while true { sleep(1) }
 }
