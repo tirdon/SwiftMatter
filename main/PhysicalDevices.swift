@@ -2,19 +2,19 @@
 final class LED: GPIO {
     var enabled: Bool = false {
         didSet {
-            gpio_set_level(GPIO_NUM_10, enabled ? 1 : 0)
-            // gpio_set_level(GPIO_NUM_9, enabled ? 1 : 0)
+            // gpio_set_level(GPIO_NUM_10, enabled ? 1 : 0)
+            gpio_set_level(GPIO_NUM_9, enabled ? 1 : 0)
         }
     }
 
     init() {
-        gpio_reset_pin(GPIO_NUM_10)
-        gpio_set_direction(GPIO_NUM_10, GPIO_MODE_OUTPUT)
-        gpio_set_level(GPIO_NUM_10, 0)
+        // gpio_reset_pin(GPIO_NUM_10)
+        // gpio_set_direction(GPIO_NUM_10, GPIO_MODE_OUTPUT)
+        // gpio_set_level(GPIO_NUM_10, 0)
 
-        // gpio_reset_pin(GPIO_NUM_9)
-        // gpio_set_direction(GPIO_NUM_9, GPIO_MODE_OUTPUT)
-        // gpio_set_level(GPIO_NUM_9, 0)
+        gpio_reset_pin(GPIO_NUM_9)
+        gpio_set_direction(GPIO_NUM_9, GPIO_MODE_OUTPUT)
+        gpio_set_level(GPIO_NUM_9, 0)
 
         _ = Unmanaged.passRetained(self)
     }
@@ -111,7 +111,7 @@ final class DHT22Sensor {
                 // print("Humidity: \(dht.humidity)  Temp: \(dht.temperature)\n")
                 // print("Could not read data from sensor: \(res)\n")
             }
-            vTaskDelay(1_000_000 * UInt32(configTICK_RATE_HZ) / 1000)
+            vTaskDelay(5 * 60 * 1_000_0)
         }
     }
 
@@ -142,16 +142,19 @@ final class DHT22Sensor {
 }
 
 //MARK: - IR
-enum NecResult {
-    case frame(UInt32)  // Full 32-bit NEC frame decoded
-    case repeatCode     // Repeat burst (button held)
-}
 
 final class IRSensor {
+    enum NecResult {
+        case frame(UInt32)  // Full 32-bit NEC frame decoded
+        case repeatCode  // Repeat burst (button held)
+    }
+
     private let gpio: gpio_num_t = GPIO_NUM_0
     // private let endpointId: UInt16
     // private let led: LED
     var taskHandle: TaskHandle_t? = nil
+
+    let led: LED
 
     // GPIO ISR: fires on falling edge, notifies the IR task
     private static let gpioISR: gpio_isr_t = { arg in
@@ -167,7 +170,8 @@ final class IRSensor {
         portYIELD_FROM_ISR_shim(xHigherPriorityTaskWoken)
     }
 
-    init() {
+    init(led: LED) {
+        self.led = led
         gpio_reset_pin(gpio)
         gpio_set_direction(gpio, GPIO_MODE_INPUT)
         gpio_pullup_en(gpio)
@@ -181,36 +185,27 @@ final class IRSensor {
         _ = Unmanaged.passRetained(self)
     }
 
-    // private func setSwitchState(_ enabled: Bool) {
-    //     var att_dataType: esp_matter_attr_val_t = esp_matter_bool(enabled)
-    //     let err = esp_matter.attribute.update_shim(
-    //         endpointId,
-    //         UInt32(chip.app.Clusters.OnOff.Id),
-    //         UInt32(chip.app.Clusters.OnOff.Attributes.OnOff.Id),
-    //         &att_dataType
-    //     )
-
-    //     if err != ESP_OK { print("ir update failed: \(err)") }
-    // }
-
     private func handleCommand(frame: UInt32, isRepeat: Bool = false) {
-        let address = UInt8(frame & 0xFF)  // identifies the specific device
+        //let address = UInt8(frame & 0xFF)  // identifies the specific device
         let command = UInt8((frame >> 16) & 0xFF)  // identifies the command
 
-        if !isRepeat {
-            print(
-                "IR TSOP38238: frame=0x\(String(frame, radix: 16)) address=0x\(String(address, radix: 16)) command=0x\(String(command, radix: 16))"
-            )
-        }
+        // if !isRepeat {
+        //     print(
+        //         "IR TSOP38238: frame=0x\(String(frame, radix: 16)) address=0x\(String(address, radix: 16)) command=0x\(String(command, radix: 16))"
+        //     )
+        // }
 
         switch command {
         case 0x1:  // Common NEC "Power" key
-            // let nextState = !led.enabled
-            // setSwitchState(nextState)
-            // print("IR TSOP38238: POWER command -> switch \(nextState ? \"ON\" : \"OFF\")")
-            print("IR TSOP38238: POWER command -> switch ON/OFF.\(isRepeat ? " (repeat)" : "")")
-        default:
-            print("IR TSOP38238: unhandled command 0x\(String(command, radix: 16))\(isRepeat ? " (repeat)" : "")")
+            // print("IR TSOP38238: POWER command -> switch OFF.\(isRepeat ? " (repeat)" : "")")
+            self.led.enabled = false
+        case 0x1a:
+            // print("IR TSOP38238: 0x1a command -> switch ON.\(isRepeat ? " (repeat)" : "")")
+            self.led.enabled = true
+        default: break
+        // print(
+        //     "IR TSOP38238: unhandled command 0x\(String(command, radix: 16))\(isRepeat ? " (repeat)" : "")"
+        // )
         }
     }
 
@@ -312,7 +307,7 @@ final class IRSensor {
 
             case .repeatCode:
                 if let frame = lastFrame,
-                   (now - lastSignalTime) < repeatTimeoutUs
+                    (now - lastSignalTime) < repeatTimeoutUs
                 {
                     lastSignalTime = now
                     ir.handleCommand(frame: frame, isRepeat: true)
@@ -322,9 +317,8 @@ final class IRSensor {
             }
 
             // Short debounce, then re-enable interrupt for next signal
-            vTaskDelay(50 * UInt32(configTICK_RATE_HZ) / 1000)
+            vTaskDelay(1_000 * UInt32(configTICK_RATE_HZ) / 1000)
             gpio_intr_enable(ir.gpio)
         }
     }
-
 }

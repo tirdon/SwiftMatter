@@ -33,10 +33,10 @@ func main() -> Never {
 	rootNode.addEndpoint(temperatureEndpoint)
 
 	xTaskCreate(
-		DHT22Sensor.dht_rx_task, "dht_rx_task", 4096, Unmanaged.passRetained(dht).toOpaque(), 4,
+		DHT22Sensor.dht_rx_task, "dht_rx_task", 4096, Unmanaged.passRetained(dht).toOpaque(), 3,
 		nil)
 
-	let ir = IRSensor()
+	let ir = IRSensor(led: led)
 	xTaskCreate(
 		IRSensor.ir_rx_task, "ir_rx_task", 4096, Unmanaged.passRetained(ir).toOpaque(), 4,
 		nil)
