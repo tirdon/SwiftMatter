@@ -1,26 +1,28 @@
 # SwiftMatter — Irrigation Controller
 
-An ESP32-C3/C6 irrigation controller built entirely in **Embedded Swift**, using the [Matter](https://csa-iot.org/all-solutions/matter/) smart home protocol. The device exposes an on/off switch (for valve/relay control), a DHT22 temperature sensor, and a DHT22 humidity sensor — all as standard Matter endpoints controllable from Apple Home, Google Home, or any Matter-compatible app.
+An ESP32-C3/C6 irrigation controller built entirely in **Embedded Swift**, using the [Matter](https://csa-iot.org/all-solutions/matter/) smart home protocol through the ESP-Matter SDK by Espressif. The device exposes an on/off switch (for valve/relay control), a DHT22 temperature/humidity sensor, a DS18B20 waterproof temperature sensor, and a capacitive soil moisture sensor — all as standard Matter endpoints controllable from Apple Home, Google Home, or any Matter-compatible app.
 
 ## Features
 
 - **Matter over Wi-Fi** — commission and control the device from any Matter fabric (Apple Home, Google Home, etc.)
-- **On/Off Switch Endpoint** — toggles external LEDs / relays on GPIO 9 & 10
-- **Temperature Sensor Endpoint** — reports DHT22 temperature (°C × 100) via Matter `TemperatureMeasurement` cluster
-- **Humidity Sensor Endpoint** — reports DHT22 relative humidity (% × 100) via Matter `RelativeHumidityMeasurement` cluster
+- **On/Off Switch Endpoint** — toggles external LED / relay on GPIO 9
+- **DHT22 Endpoints** — reports temperature and relative humidity via standard Matter clusters
+- **DS18B20 Endpoint** — reports water/soil temperature using the 1-Wire protocol
+- **Capacitive Soil Moisture Endpoint** — reports soil moisture percentage via ADC
 - **Physical Button** — GPIO 21 button toggles the switch state and reports back to the Matter fabric
 - **Onboard LED** — GPIO 8 status LED indicates Wi-Fi connectivity
-- **IR Receiver (NEC)** — TSOP38238 on GPIO 0, full NEC protocol decode with hold/repeat support, low-power ISR + `ulTaskNotifyTake` pattern (zero CPU usage while idle)
+- **IR Receiver (NEC)** — TSOP38238 on GPIO 0, full NEC protocol decode with hold/repeat support, low-power ISR + `ulTaskNotifyTake` pattern
 
 ## Hardware
 
 | Component | GPIO | Notes |
 |-----------|------|-------|
-| LED / Relay A | 10 | Active high |
-| LED / Relay B | 9 | Active high (currently commented out) |
+| LED / Relay | 9 | Active high |
 | Onboard Status LED | 8 | Active low (on = Wi-Fi disconnected) |
 | Push Button | 21 | Active high, 10 ms debounce, 2 s long press |
-| DHT22 (AM2301) | 4 | Open-drain, temperature + humidity |
+| DHT22 (AM2301) | 4 | Open-drain, ambient temperature + humidity |
+| DS18B20 | *Configurable* | Open-drain, waterproof temperature probe, 1-Wire |
+| Capacitive Soil Moisture | *ADC Channel* | Analog (mapped from 0-4095 to 100%-0%) |
 | IR Receiver (TSOP38238) | 0 | Input with pull-up, NEC protocol, ISR on falling edge |
 
 ## Project Structure
@@ -37,7 +39,7 @@ Irrigation/
 │   ├── idf_component.yml       # ESP Component Registry dependencies (dht, cmake_utilities)
 │   ├── linker.lf               # Linker fragment
 │   ├── Main.swift              # app_main entry point — wires up endpoints, tasks, button
-│   ├── PhysicalDevices.swift   # LED, Button, DHT22Sensor, IRSensor hardware drivers
+│   ├── PhysicalDevices.swift   # LED, Button, DHT22, DS18B20, Soil Moisture, IR drivers
 │   └── SwitchEndpoint.swift    # Matter endpoint definitions (switch, temp, humidity)
 │
 └── MatterInterface/
@@ -45,41 +47,41 @@ Irrigation/
     ├── MatterInterface.cpp     # C++ shim implementations (callback, attribute, report)
     ├── Core.swift              # Protocol hierarchy (MatterNode/Endpoint/Cluster/Attribute)
     ├── Core+ID.swift           # Typed ClusterID / AttributeID wrappers, concrete clusters
-    ├── Matter.swift            # Matter.Node event routing, Matter.Endpoint with Attribute enum
-    ├── Matter+Application.swift # Matter.Application — start, Wi-Fi event handling, recommission
-    └── Matter+OnBoardLED.swift # Onboard status LED (GPIO 8)
+    ├── Core+RootNode.swift     # Data model concrete structs (RootNode, Endpoint, etc.)
+    ├── Matter.swift            # Matter.Node event routing, Matter.Endpoint attributes
+    ├── Matter+Application.swift # Matter.Application — start, Wi-Fi event handling
+    └── Matter+OnBoardLED.swift  # Onboard status LED (GPIO 8)
 ```
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                      Main.swift                           │
-│              app_main() → Never                           │
-│                                                           │
-│  ┌──────────┐  ┌─────────┐  ┌────────────┐  ┌─────────┐ │
-│  │   LED    │  │ Button  │  │ DHT22Sensor│  │IRSensor │ │
-│  │ GPIO 10  │  │ GPIO 21 │  │   GPIO 4   │  │ GPIO 0  │ │
-│  └────┬─────┘  └────┬────┘  └─────┬──────┘  └────┬────┘ │
-│       │             │             │               │      │
-│       │             │         FreeRTOS task    GPIO ISR + │
-│       │             │        (dht_rx_task)   ulTaskNotify │
-│       │             │         polls every    (ir_rx_task) │
-│       │             │           ~1000s        blocks till │
-│       │             │                        falling edge│
-│  ┌────▼─────────────▼─────────────▼───────────────▼───┐  │
-│  │                   Matter.Node                      │  │
-│  │  ┌──────────────┬───────────┬───────────────┐      │  │
-│  │  │ SwitchEndpt  │ TempEndpt │  HumidEndpt   │      │  │
-│  │  │  (OnOff)     │ (DHT22)  │   (DHT22)     │      │  │
-│  │  └──────────────┴───────────┴───────────────┘      │  │
-│  └───────────────────────┬────────────────────────────┘  │
-│                          │                               │
-│  ┌───────────────────────▼────────────────────────────┐  │
-│  │              Matter.Application                    │  │
-│  │         esp_matter.start() → Wi-Fi → Fabric        │  │
-│  └────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                                       Main.swift                                       │
+│                                   app_main() → Never                                   │
+│                                                                                        │
+│  ┌─────────┐  ┌─────────┐  ┌───────────┐  ┌───────────┐  ┌────────────┐  ┌─────────┐   │
+│  │   LED   │  │ Button  │  │   DHT22   │  │  DS18B20  │  │ Soil Moist │  │   IR    │   │
+│  │ GPIO 9  │  │ GPIO 21 │  │  GPIO 4   │  │  1-Wire   │  │    ADC     │  │ GPIO 0  │   │
+│  └────┬────┘  └────┬────┘  └─────┬─────┘  └─────┬─────┘  └──────┬─────┘  └────┬────┘   │
+│       │            │             │              │               │             │        │
+│       │            │        FreeRTOS task  FreeRTOS task   FreeRTOS task   GPIO ISR +  │
+│       │            │        polls every    polls every     polls every    notify_take  │
+│       │            │            10s            10s             10s      (blocks till)  │
+│       │            │             │              │               │       (falling edge) │
+│  ┌────▼────────────▼─────────────▼──────────────▼───────────────▼─────────────▼─────┐  │
+│  │                                 Matter.Node                                      │  │
+│  │  ┌─────────────┬───────────┬──────────────┬─────────────────┬─────────────────┐  │  │
+│  │  │ SwitchEndpt │ TempEndpt │  HumidEndpt  │ DS18B20_TempEpt │ Moist_HumidEpt  │  │  │
+│  │  │  (OnOff)    │  (DHT22)  │    (DHT22)   │    (DS18B20)    │       (ADC)     │  │  │
+│  │  └─────────────┴───────────┴──────────────┴─────────────────┴─────────────────┘  │  │
+│  └───────────────────────────────────────┬──────────────────────────────────────────┘  │
+│                                          │                                             │
+│  ┌───────────────────────────────────────▼──────────────────────────────────────────┐  │
+│  │                              Matter.Application                                  │  │
+│  │                     esp_matter.start() → Wi-Fi → Fabric                          │  │
+│  └──────────────────────────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Prerequisites
@@ -93,11 +95,13 @@ Irrigation/
 
 ```bash
 # Set required environment variables
-export IDF_PATH=/path/to/esp-idf
-export ESP_MATTER_PATH=/path/to/esp-matter
+export TOOLCHAINS=org.swift.<62202602061a swift toolchain in .plist>
+export IDF_PATH=<path to esp>/esp-idf
+export ESP_MATTER_PATH=<path to esp>/esp-matter
 
 # Source ESP-IDF
 . $IDF_PATH/export.sh
+. $ESP_MATTER_PATH/export.sh
 
 # Set target (esp32c3 or esp32c6)
 idf.py set-target esp32c3
@@ -115,7 +119,7 @@ Key settings in `sdkconfig.defaults`:
 
 | Setting | Value | Description |
 |---------|-------|-------------|
-| `CONFIG_IDF_TARGET` | `esp32c6` | Target chip (override with `set-target`) |
+| `CONFIG_IDF_TARGET` | `esp32c3` | Target chip (override with `set-target`) |
 | `CONFIG_DEFAULT_WIFI_SSID` | — | Wi-Fi network name |
 | `CONFIG_DEFAULT_WIFI_PASSWORD` | — | Wi-Fi password |
 | `CONFIG_ENABLE_CHIP_SHELL` | `y` | Matter CLI shell for debugging |
@@ -192,4 +196,4 @@ The IR task uses a **GPIO ISR + `ulTaskNotifyTake`** pattern instead of busy-pol
 
 ## License
 
-See individual file headers for license information. Swift bridging code follows the Apache License v2.0 with Runtime Library Exception.
+This project is released under the [Creative Commons Zero (CC0 1.0 Universal)](https://creativecommons.org/publicdomain/zero/1.0/) license. You can copy, modify, distribute and perform the work, even for commercial purposes, all without asking permission.
