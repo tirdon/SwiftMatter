@@ -3,7 +3,7 @@
 
 extension Matter {
     final class OnBoardLED: GPIO {
-        private static let pin = GPIO_NUM_8
+        private static let pin = GPIO_NUM_15
 
         var enabled: Bool = true {
             didSet {

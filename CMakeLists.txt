@@ -7,16 +7,8 @@ if(NOT DEFINED ENV{ESP_MATTER_PATH})
 endif(NOT DEFINED ENV{ESP_MATTER_PATH})
 
 if(NOT DEFINED ENV{ESP_MATTER_DEVICE_PATH})
-    if("${IDF_TARGET}" STREQUAL "esp32" OR "${IDF_TARGET}" STREQUAL "")
-        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32_devkit_c)
-    elseif("${IDF_TARGET}" STREQUAL "esp32c3")
+    if("${IDF_TARGET}" STREQUAL "esp32c3")
         set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32c3_devkit_m)
-    elseif("${IDF_TARGET}" STREQUAL "esp32c2")
-        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32c2_devkit_m)
-    elseif("${IDF_TARGET}" STREQUAL "esp32h2")
-        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32h2_devkit_c)
-    elseif("${IDF_TARGET}" STREQUAL "esp32s3")
-        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32s3_devkit_c)
     elseif("${IDF_TARGET}" STREQUAL "esp32c6")
         set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32c6_devkit_c)
     else()
@@ -40,8 +32,8 @@ set(EXTRA_COMPONENT_DIRS
     "${ESP_MATTER_PATH}/components"
     "${ESP_MATTER_PATH}/components/esp_matter/data_model"
     "${ESP_MATTER_PATH}/device_hal/device"
-    ${extra_components_dirs_append}
     "${MATTER_SDK_PATH}/src/include"
+    ${extra_components_dirs_append}
 )
 
 project(light)

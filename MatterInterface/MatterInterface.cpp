@@ -86,3 +86,7 @@ void portYIELD_FROM_ISR_shim(int32_t xHigherPriorityTaskWoken) {
   }
 }
 }
+
+void ulTaskNotifyGive_shim(TaskHandle_t xTaskToNotify) {
+  xTaskNotifyGive(xTaskToNotify);
+}

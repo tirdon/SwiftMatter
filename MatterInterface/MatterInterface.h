@@ -70,6 +70,7 @@ uint32_t ulTaskNotifyTake_shim(int32_t xClearCountOnExit,
 void vTaskNotifyGiveFromISR_shim(TaskHandle_t xTaskToNotify,
                                  int32_t *pxHigherPriorityTaskWoken);
 void portYIELD_FROM_ISR_shim(int32_t xHigherPriorityTaskWoken);
+void ulTaskNotifyGive_shim(TaskHandle_t xTaskToNotify);
 
 #ifdef __cplusplus
 }

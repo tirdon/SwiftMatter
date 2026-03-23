@@ -1,6 +1,6 @@
 //MARK: - LED
 final class LED: GPIO {
-    private static let pin = GPIO_NUM_9
+    private static let pin = GPIO_NUM_6
 
     var enabled: Bool = false {
         didSet {
@@ -19,7 +19,7 @@ final class LED: GPIO {
 
 //MARK: - Button
 final class Button {
-    private static let pin = GPIO_NUM_21
+    private static let pin = GPIO_NUM_7
 
     private let id: UInt16
     private let led: LED
@@ -40,7 +40,7 @@ final class Button {
         buttonConfig.short_press_time = 10
 
         buttonGpioConfig.active_level = 1
-        buttonGpioConfig.gpio_num = 21
+        buttonGpioConfig.gpio_num = Int32(Button.pin.rawValue)
 
         _ = Unmanaged.passRetained(self)
     }
@@ -145,21 +145,21 @@ final class IRSensor {
     // NEC IR command codes
     private enum Command {
         static let powerOff: UInt8 = 0x01
-        static let powerOn:  UInt8 = 0x1a
+        static let powerOn: UInt8 = 0x1a
     }
 
     // NEC protocol timing thresholds (microseconds)
     private enum Timing {
-        static let leadLowMin:    Int64 = 8_500
-        static let leadLowMax:    Int64 = 9_500
+        static let leadLowMin: Int64 = 8_500
+        static let leadLowMax: Int64 = 9_500
         static let repeatHighMin: Int64 = 2_000
         static let repeatHighMax: Int64 = 2_800
-        static let frameHighMin:  Int64 = 4_000
-        static let frameHighMax:  Int64 = 5_000
-        static let bitLowMin:     Int64 = 400
-        static let bitLowMax:     Int64 = 800
+        static let frameHighMin: Int64 = 4_000
+        static let frameHighMax: Int64 = 5_000
+        static let bitLowMin: Int64 = 400
+        static let bitLowMax: Int64 = 800
         static let bitHighThreshold: Int64 = 1_200
-        static let pulseTimeout:  Int64 = 20_000
+        static let pulseTimeout: Int64 = 20_000
     }
 
     /// Repeat timeout in microseconds (200ms).
@@ -252,9 +252,9 @@ final class IRSensor {
     }
 
     private static func isValidNec(_ frame: UInt32) -> Bool {
-        let address    = UInt8( frame        & 0xFF)
-        let addressInv = UInt8((frame >>  8) & 0xFF)
-        let command    = UInt8((frame >> 16) & 0xFF)
+        let address = UInt8(frame & 0xFF)
+        let addressInv = UInt8((frame >> 8) & 0xFF)
+        let command = UInt8((frame >> 16) & 0xFF)
         let commandInv = UInt8((frame >> 24) & 0xFF)
 
         return (address ^ addressInv) == 0xFF && (command ^ commandInv) == 0xFF
@@ -322,23 +322,23 @@ final class IRSensor {
 final class DS18B20Sensor {
     // 1-Wire ROM commands
     private enum ROM {
-        static let skip: UInt8       = 0xCC
-        static let convertT: UInt8   = 0x44
+        static let skip: UInt8 = 0xCC
+        static let convertT: UInt8 = 0x44
         static let readScratch: UInt8 = 0xBE
     }
 
     // 1-Wire timing constants (microseconds)
     private enum Timing {
-        static let resetLow:       Int64 = 480
-        static let presenceWait:   Int64 = 70
-        static let presenceSlot:   Int64 = 410
-        static let writeBit1Low:   Int64 = 6
-        static let writeBit1High:  Int64 = 64
-        static let writeBit0Low:   Int64 = 60
-        static let writeBit0High:  Int64 = 10
-        static let readInitLow:    Int64 = 3
+        static let resetLow: Int64 = 480
+        static let presenceWait: Int64 = 70
+        static let presenceSlot: Int64 = 410
+        static let writeBit1Low: Int64 = 6
+        static let writeBit1High: Int64 = 64
+        static let writeBit0Low: Int64 = 60
+        static let writeBit0High: Int64 = 10
+        static let readInitLow: Int64 = 3
         static let readSampleWait: Int64 = 10
-        static let readSlotEnd:    Int64 = 53
+        static let readSlotEnd: Int64 = 53
     }
 
     /// Conversion wait in milliseconds (DS18B20 12-bit resolution).
@@ -549,5 +549,173 @@ final class MakerSoilMoistureSensor {
             &att_dataType
         )
         if err != ESP_OK { print("MakerSoilMoisture update failed: \(err)") }
+    }
+}
+
+//MARK: - IR Transmitter
+
+final class IRTransmitter {
+    // NEC protocol timing constants (microseconds)
+    private enum Timing {
+        static let carrierFrequency: Int64 = 38  // kHz
+        static let carrierPeriodUs: Int64 = 26  // ~1/38kHz ≈ 26.3µs
+        static let carrierDutyUs: Int64 = 9  // ~1/3 duty cycle
+
+        static let leadLow: Int64 = 9_000  // 9ms leading pulse burst
+        static let leadHigh: Int64 = 4_500  // 4.5ms space
+        static let bitLow: Int64 = 562  // 562µs pulse burst
+        static let bitHighOne: Int64 = 1_687  // 1.687ms space for '1'
+        static let bitHighZero: Int64 = 562  // 562µs space for '0'
+
+        static let repeatLeadLow: Int64 = 9_000  // 9ms leading pulse burst
+        static let repeatLeadHigh: Int64 = 2_250  // 2.25ms space
+        static let repeatBurst: Int64 = 562  // trailing burst
+    }
+
+    /// Minimum gap between consecutive transmissions (milliseconds).
+    private static let txCooldownMs: UInt32 = 70
+
+    private let gpio: gpio_num_t
+    var taskHandle: TaskHandle_t? = nil
+
+    /// Frame to transmit — set before notifying the task.
+    private var pendingFrame: UInt32 = 0
+    /// Number of repeat codes to send after the initial frame.
+    private var pendingRepeatCount: UInt8 = 0
+
+    init(pin: gpio_num_t) {
+        self.gpio = pin
+
+        gpio_reset_pin(gpio)
+        gpio_set_direction(gpio, GPIO_MODE_OUTPUT)
+        gpio_set_level(gpio, 0)
+
+        _ = Unmanaged.passRetained(self)
+    }
+
+    // Low-level carrier / space helpers
+
+    /// Emit 38 kHz carrier burst for the given duration (µs).
+    private func carrierBurst(durationUs: Int64) {
+        let start = esp_timer_get_time()
+        while (esp_timer_get_time() - start) < durationUs {
+            gpio_set_level(gpio, 1)
+            delayUs(Timing.carrierDutyUs)
+            gpio_set_level(gpio, 0)
+            delayUs(Timing.carrierPeriodUs - Timing.carrierDutyUs)
+        }
+    }
+
+    /// Hold the line low (space / mark-space) for the given duration (µs).
+    private func space(durationUs: Int64) {
+        gpio_set_level(gpio, 0)
+        delayUs(durationUs)
+    }
+
+    private func delayUs(_ us: Int64) {
+        let start = esp_timer_get_time()
+        while (esp_timer_get_time() - start) < us {}
+    }
+
+    // NEC frame transmission
+
+    /// Send a full 32-bit NEC frame (address, address inv, command, command inv).
+    func sendFrame(_ frame: UInt32) {
+        // Leading pulse burst + space
+        carrierBurst(durationUs: Timing.leadLow)
+        space(durationUs: Timing.leadHigh)
+
+        // 32 data bits, LSB first
+        for bit in 0..<32 {
+            carrierBurst(durationUs: Timing.bitLow)
+            if (frame >> UInt32(bit)) & 1 == 1 {
+                space(durationUs: Timing.bitHighOne)
+            } else {
+                space(durationUs: Timing.bitHighZero)
+            }
+        }
+
+        // Final stop burst
+        carrierBurst(durationUs: Timing.bitLow)
+        gpio_set_level(gpio, 0)
+    }
+
+    /// Send a NEC repeat code.
+    func sendRepeat() {
+        carrierBurst(durationUs: Timing.repeatLeadLow)
+        space(durationUs: Timing.repeatLeadHigh)
+        carrierBurst(durationUs: Timing.repeatBurst)
+        gpio_set_level(gpio, 0)
+    }
+
+    /// Build a full NEC frame from an 8-bit address and 8-bit command, then send it.
+    func sendCommand(address: UInt8, command: UInt8, repeatCount: UInt8 = 0) {
+        let addressInv = ~address
+        let commandInv = ~command
+
+        let frame: UInt32 =
+            UInt32(address)
+            | (UInt32(addressInv) << 8)
+            | (UInt32(command) << 16)
+            | (UInt32(commandInv) << 24)
+
+        sendFrame(frame)
+
+        for _ in 0..<repeatCount {
+            vTaskDelay(IRTransmitter.txCooldownMs * UInt32(configTICK_RATE_HZ) / 1000)
+            sendRepeat()
+        }
+    }
+
+    /// Enqueue a frame for the transmitter task to send.
+    func enqueue(frame: UInt32, repeatCount: UInt8 = 0) {
+        pendingFrame = frame
+        pendingRepeatCount = repeatCount
+
+        guard let handle = taskHandle else { return }
+        ulTaskNotifyGive_shim(handle)
+    }
+
+    /// Enqueue an address + command for the transmitter task to send.
+    func enqueueCommand(address: UInt8, command: UInt8, repeatCount: UInt8 = 0) {
+        let addressInv = ~address
+        let commandInv = ~command
+
+        pendingFrame =
+            UInt32(address)
+            | (UInt32(addressInv) << 8)
+            | (UInt32(command) << 16)
+            | (UInt32(commandInv) << 24)
+        pendingRepeatCount = repeatCount
+
+        guard let handle = taskHandle else { return }
+        ulTaskNotifyGive_shim(handle)
+    }
+
+    // FreeRTOS task
+
+    static let ir_tx_task: @convention(c) (UnsafeMutableRawPointer?) -> Void = { param in
+        print("IR TX Task started")
+
+        guard let param else { return }
+        let tx = Unmanaged<IRTransmitter>.fromOpaque(param).takeRetainedValue()
+
+        tx.taskHandle = xTaskGetCurrentTaskHandle()
+
+        while true {
+            // Block until notified
+            let notified = ulTaskNotifyTake_shim(1, portMAX_DELAY)
+            if notified == 0 { continue }
+
+            let frame = tx.pendingFrame
+            let repeats = tx.pendingRepeatCount
+
+            tx.sendFrame(frame)
+
+            for _ in 0..<repeats {
+                vTaskDelay(txCooldownMs * UInt32(configTICK_RATE_HZ) / 1000)
+                tx.sendRepeat()
+            }
+        }
     }
 }
