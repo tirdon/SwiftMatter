@@ -1,6 +1,6 @@
 //MARK: - LED
 final class LED: GPIO {
-    private static let pin = GPIO_NUM_6
+    private static let pin = GPIO_NUM_16
 
     var enabled: Bool = false {
         didSet {
@@ -19,7 +19,7 @@ final class LED: GPIO {
 
 //MARK: - Button
 final class Button {
-    private static let pin = GPIO_NUM_7
+    private static let pin = GPIO_NUM_17
 
     private let id: UInt16
     private let led: LED
