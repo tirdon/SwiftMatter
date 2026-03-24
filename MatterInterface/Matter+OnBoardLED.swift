@@ -1,5 +1,5 @@
 // Matter+OnBoardLED.swift
-// On-board status LED (active-low on GPIO 8).
+// On-board status LED (active-low on GPIO 15).
 
 extension Matter {
     final class OnBoardLED: GPIO {

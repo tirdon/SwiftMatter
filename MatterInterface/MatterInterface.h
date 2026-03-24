@@ -58,6 +58,8 @@ esp_err_t update_shim(uint16_t endpoint_id, unsigned int cluster_id,
 // Recomissioning causes failures with reference semantics so this is done as a
 // function implemented in C++. Ideally this would be done by changing some of
 // the headers in ESP Matter to have proper Swift annotations.
+void printStationIP();
+void printFabricInfo();
 void recomissionFabric();
 
 // FreeRTOS task notification shims (macros not visible to Swift)
@@ -71,6 +73,11 @@ void vTaskNotifyGiveFromISR_shim(TaskHandle_t xTaskToNotify,
                                  int32_t *pxHigherPriorityTaskWoken);
 void portYIELD_FROM_ISR_shim(int32_t xHigherPriorityTaskWoken);
 void ulTaskNotifyGive_shim(TaskHandle_t xTaskToNotify);
+
+// Crash recovery and heap monitoring shims
+void esp_restart_shim(void);
+uint32_t get_free_heap_size_shim(void);
+uint32_t get_min_free_heap_size_shim(void);
 
 #ifdef __cplusplus
 }

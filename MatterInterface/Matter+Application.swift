@@ -6,9 +6,7 @@ extension Matter {
         var rootNode: Matter.Node? = nil
         let led = Matter.OnBoardLED()
 
-        init() {
-            _ = Unmanaged.passRetained(self)
-        }
+        init() { _ = Unmanaged.passRetained(self) }
 
         func start() {
             func callback(
@@ -24,12 +22,22 @@ extension Matter {
                 case chip.DeviceLayer.DeviceEventType.kFabricRemoved:
                     recomissionFabric()
                     print("Fabric removed")
+                    printFabricInfo()
+
+                case chip.DeviceLayer.DeviceEventType.kFabricCommitted:
+                    print("Fabric committed")
+                    printFabricInfo()
+
+                case chip.DeviceLayer.DeviceEventType.kFabricUpdated:
+                    print("Fabric updated")
+                    printFabricInfo()
 
                 case Int(chip.DeviceLayer.DeviceEventType.kWiFiConnectivityChange.rawValue):
                     let result = event.pointee.WiFiConnectivityChange.Result
                     if result == chip.DeviceLayer.kConnectivity_Established {
                         led.enabled = false
                         print("WiFi connected")
+                        printStationIP()
                     } else if result == chip.DeviceLayer.kConnectivity_Lost {
                         led.enabled = true
                         print("WiFi disconnected")

@@ -1,3 +1,16 @@
+// MARK: - Helpers
+
+/// Convert milliseconds to FreeRTOS ticks.
+func msToTicks(_ ms: UInt32) -> UInt32 {
+    ms * UInt32(configTICK_RATE_HZ) / 1000
+}
+
+/// Busy-wait delay for the given number of microseconds.
+private func delayUs(_ us: Int64) {
+    let start = esp_timer_get_time()
+    while (esp_timer_get_time() - start) < us {}
+}
+
 //MARK: - LED
 final class LED: GPIO {
     private static let pin = GPIO_NUM_16
@@ -105,7 +118,7 @@ final class DHT22Sensor {
                 dht.update_humidity()
             }
 
-            vTaskDelay(readIntervalMs * UInt32(configTICK_RATE_HZ) / 1000)
+            vTaskDelay(msToTicks(readIntervalMs))
         }
     }
 
@@ -274,44 +287,40 @@ final class IRSensor {
         gpio_intr_enable(ir.gpio)
 
         while true {
-            let notified = ulTaskNotifyTake_shim(
-                1, notifyTimeoutMs * UInt32(configTICK_RATE_HZ) / 1000)
+            let notified = ulTaskNotifyTake_shim(1, msToTicks(notifyTimeoutMs))
+
+            var shouldDebounce = false
 
             if notified == 0 {
                 lastFrame = nil
-                gpio_intr_enable(ir.gpio)
-                continue
-            }
+            } else if let result = decodeNecFrame(gpio: ir.gpio) {
+                let now = esp_timer_get_time()
 
-            guard let result = decodeNecFrame(gpio: ir.gpio) else {
-                gpio_intr_enable(ir.gpio)
-                continue
-            }
+                switch result {
+                case .frame(let frame):
+                    if isValidNec(frame) {
+                        lastFrame = frame
+                        lastSignalTime = now
+                        ir.handleCommand(frame: frame)
+                        shouldDebounce = true
+                    }
 
-            let now = esp_timer_get_time()
-
-            switch result {
-            case .frame(let frame):
-                guard isValidNec(frame) else {
-                    gpio_intr_enable(ir.gpio)
-                    continue
-                }
-                lastFrame = frame
-                lastSignalTime = now
-                ir.handleCommand(frame: frame)
-
-            case .repeatCode:
-                if let frame = lastFrame,
-                    (now - lastSignalTime) < repeatTimeoutUs
-                {
-                    lastSignalTime = now
-                    ir.handleCommand(frame: frame, isRepeat: true)
-                } else {
-                    lastFrame = nil
+                case .repeatCode:
+                    if let frame = lastFrame,
+                        (now - lastSignalTime) < repeatTimeoutUs
+                    {
+                        lastSignalTime = now
+                        ir.handleCommand(frame: frame, isRepeat: true)
+                        shouldDebounce = true
+                    } else {
+                        lastFrame = nil
+                    }
                 }
             }
 
-            vTaskDelay(debounceMs * UInt32(configTICK_RATE_HZ) / 1000)
+            if shouldDebounce {
+                vTaskDelay(msToTicks(debounceMs))
+            }
             gpio_intr_enable(ir.gpio)
         }
     }
@@ -361,11 +370,6 @@ final class DS18B20Sensor {
         gpio_set_level(gpio, 1)
 
         _ = Unmanaged.passRetained(self)
-    }
-
-    private func delayUs(_ us: Int64) {
-        let start = esp_timer_get_time()
-        while (esp_timer_get_time() - start) < us {}
     }
 
     private func reset() -> Bool {
@@ -438,15 +442,15 @@ final class DS18B20Sensor {
         writeByte(ROM.skip)
         writeByte(ROM.convertT)
 
-        vTaskDelay(DS18B20Sensor.conversionMs * UInt32(configTICK_RATE_HZ) / 1000)
+        vTaskDelay(msToTicks(DS18B20Sensor.conversionMs))
 
         if !reset() { return nil }
         writeByte(ROM.skip)
         writeByte(ROM.readScratch)
 
-        var data: [UInt8] = []
-        for _ in 0..<DS18B20Sensor.scratchpadSize {
-            data.append(readByte())
+        var data = [UInt8](repeating: 0, count: DS18B20Sensor.scratchpadSize)
+        for i in 0..<DS18B20Sensor.scratchpadSize {
+            data[i] = readByte()
         }
 
         if crc8(Array(data[0..<8])) != data[8] {
@@ -472,7 +476,7 @@ final class DS18B20Sensor {
                     sensor.update_temp()
                 }
             }
-            vTaskDelay(readIntervalMs * UInt32(configTICK_RATE_HZ) / 1000)
+            vTaskDelay(msToTicks(readIntervalMs))
         }
     }
 
@@ -535,7 +539,7 @@ final class MakerSoilMoistureSensor {
                 sensor.updateMoisture()
             }
 
-            vTaskDelay(readIntervalMs * UInt32(configTICK_RATE_HZ) / 1000)
+            vTaskDelay(msToTicks(readIntervalMs))
         }
     }
 
@@ -612,11 +616,6 @@ final class IRTransmitter {
         delayUs(durationUs)
     }
 
-    private func delayUs(_ us: Int64) {
-        let start = esp_timer_get_time()
-        while (esp_timer_get_time() - start) < us {}
-    }
-
     // NEC frame transmission
 
     /// Send a full 32-bit NEC frame (address, address inv, command, command inv).
@@ -648,21 +647,20 @@ final class IRTransmitter {
         gpio_set_level(gpio, 0)
     }
 
+    /// Build a full NEC frame from an 8-bit address and 8-bit command.
+    private static func buildNecFrame(address: UInt8, command: UInt8) -> UInt32 {
+        UInt32(address)
+            | (UInt32(~address) << 8)
+            | (UInt32(command) << 16)
+            | (UInt32(~command) << 24)
+    }
+
     /// Build a full NEC frame from an 8-bit address and 8-bit command, then send it.
     func sendCommand(address: UInt8, command: UInt8, repeatCount: UInt8 = 0) {
-        let addressInv = ~address
-        let commandInv = ~command
-
-        let frame: UInt32 =
-            UInt32(address)
-            | (UInt32(addressInv) << 8)
-            | (UInt32(command) << 16)
-            | (UInt32(commandInv) << 24)
-
-        sendFrame(frame)
+        sendFrame(Self.buildNecFrame(address: address, command: command))
 
         for _ in 0..<repeatCount {
-            vTaskDelay(IRTransmitter.txCooldownMs * UInt32(configTICK_RATE_HZ) / 1000)
+            vTaskDelay(msToTicks(IRTransmitter.txCooldownMs))
             sendRepeat()
         }
     }
@@ -678,14 +676,7 @@ final class IRTransmitter {
 
     /// Enqueue an address + command for the transmitter task to send.
     func enqueueCommand(address: UInt8, command: UInt8, repeatCount: UInt8 = 0) {
-        let addressInv = ~address
-        let commandInv = ~command
-
-        pendingFrame =
-            UInt32(address)
-            | (UInt32(addressInv) << 8)
-            | (UInt32(command) << 16)
-            | (UInt32(commandInv) << 24)
+        pendingFrame = Self.buildNecFrame(address: address, command: command)
         pendingRepeatCount = repeatCount
 
         guard let handle = taskHandle else { return }
@@ -713,7 +704,7 @@ final class IRTransmitter {
             tx.sendFrame(frame)
 
             for _ in 0..<repeats {
-                vTaskDelay(txCooldownMs * UInt32(configTICK_RATE_HZ) / 1000)
+                vTaskDelay(msToTicks(txCooldownMs))
                 tx.sendRepeat()
             }
         }
