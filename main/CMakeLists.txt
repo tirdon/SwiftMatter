@@ -82,8 +82,6 @@ enable_language(Swift)
 target_sources(${COMPONENT_LIB}
     PRIVATE
     Main.swift
-    PhysicalDevices.swift
-    SwitchEndpoint.swift
     ../MatterInterface/Core.swift
     ../MatterInterface/Core+ID.swift
     ../MatterInterface/Core+RootNode.swift

@@ -1,19 +1,21 @@
 CONFIG_IDF_TARGET="esp32c6"
 
-# libsodium
+# ── libsodium ───────────────────────────────────────────────
 CONFIG_LIBSODIUM_USE_MBEDTLS_SHA=y
 
-# NIMBLE
+# ── Bluetooth (NimBLE for Matter commissioning) ─────────────
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
 CONFIG_BT_NIMBLE_EXT_ADV=n
 CONFIG_BT_NIMBLE_HCI_EVT_BUF_SIZE=70
+CONFIG_BT_NIMBLE_ENABLE_CONN_REATTEMPT=n
 CONFIG_USE_BLE_ONLY_FOR_COMMISSIONING=y
 
-# FreeRTOS should use legacy API
+# ── FreeRTOS ────────────────────────────────────────────────
 CONFIG_FREERTOS_ENABLE_BACKWARD_COMPATIBILITY=y
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
 
-# Default to 921600 baud when flashing and monitoring device
+# ── Flash / serial ──────────────────────────────────────────
 CONFIG_ESPTOOLPY_BAUD_921600B=y
 CONFIG_ESPTOOLPY_BAUD=921600
 CONFIG_ESPTOOLPY_COMPRESSED=y
@@ -21,88 +23,93 @@ CONFIG_ESPTOOLPY_MONITOR_BAUD_115200B=y
 CONFIG_ESPTOOLPY_MONITOR_BAUD=115200
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
-#enable BT
-CONFIG_BT_ENABLED=y
-CONFIG_BT_NIMBLE_ENABLED=y
-
-#disable BT connection reattempt
-CONFIG_BT_NIMBLE_ENABLE_CONN_REATTEMPT=n
-
-#enable lwip ipv6 autoconfig
+# ── lwIP (IPv6 forwarding required for border routing) ─────
+CONFIG_LWIP_IPV4=y
 CONFIG_LWIP_IPV6_AUTOCONFIG=y
+CONFIG_LWIP_IPV6_FORWARD=y
+CONFIG_LWIP_IPV6_NUM_ADDRESSES=12
+CONFIG_LWIP_MULTICAST_PING=y
+CONFIG_LWIP_NETIF_STATUS_CALLBACK=y
+CONFIG_LWIP_HOOK_IP6_ROUTE_DEFAULT=y
+CONFIG_LWIP_HOOK_ND6_GET_GW_DEFAULT=y
+CONFIG_LWIP_HOOK_IP6_INPUT_CUSTOM=y
+CONFIG_LWIP_HOOK_IP6_SELECT_SRC_ADDR_CUSTOM=y
 
-# Use a custom partition table
+# ── Partition table ─────────────────────────────────────────
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_OFFSET=0xC000
 
-# Enable chip shell
+# ── Matter / CHIP ───────────────────────────────────────────
 CONFIG_ENABLE_CHIP_SHELL=y
-
-#enable lwIP route hooks
-CONFIG_LWIP_HOOK_IP6_ROUTE_DEFAULT=y
-CONFIG_LWIP_HOOK_ND6_GET_GW_DEFAULT=y
-
-# Use minimal mDNS
-CONFIG_USE_MINIMAL_MDNS=y
+# TBR needs platform mDNS for SRP/mDNS proxy — not the minimal CHIP mDNS
+CONFIG_USE_MINIMAL_MDNS=n
+# Disable CHIP route hooks — OpenThread BR provides its own
+CONFIG_ENABLE_ROUTE_HOOK=n
 CONFIG_ENABLE_EXTENDED_DISCOVERY=y
-
-# Enable OTA Requestor
-CONFIG_ENABLE_OTA_REQUESTOR=y
-
-# Disable AP
-CONFIG_ENABLE_WIFI_STATION=y
-CONFIG_ENABLE_WIFI_AP=n
-
-# Button
-CONFIG_BUTTON_PERIOD_TIME_MS=20
-CONFIG_BUTTON_LONG_PRESS_TIME_MS=5000
-
-# disable softap by default
-CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n
-
-# Disable DS Peripheral
-CONFIG_ESP_SECURE_CERT_DS_PERIPHERAL=n
-
-# Use compact attribute storage mode
+# OTA disabled — binary exceeds dual-OTA capacity on 4 MB flash
+CONFIG_ENABLE_OTA_REQUESTOR=n
 CONFIG_ESP_MATTER_NVS_USE_COMPACT_ATTR_STORAGE=y
-
-# Enable HKDF in mbedtls
-CONFIG_MBEDTLS_HKDF_C=y
-
-# Increase LwIP IPv6 address number to 6 (MAX_FABRIC + 1)
-# unique local addresses for fabrics(MAX_FABRIC), a link local address(1)
-CONFIG_LWIP_IPV6_NUM_ADDRESSES=6
-
-# ESP32-DevKitC Settings
-# Buttons
-CONFIG_BSP_BUTTONS_NUM=1
-CONFIG_BSP_BUTTON_1_TYPE_GPIO=y
-CONFIG_BSP_BUTTON_1_GPIO=0
-CONFIG_BSP_BUTTON_1_LEVEL=0
-# LEDs
-CONFIG_BSP_LEDS_NUM=0
-
-# configurations required for diagnostic logs cluster
-# Enable the diagnostic logs transfer over BDX protocol
 CONFIG_CHIP_ENABLE_BDX_LOG_TRANSFER=y
 
-CONFIG_ESP32_ENABLE_COREDUMP_TO_FLASH=y
-CONFIG_ESP32_COREDUMP_DATA_FORMAT_ELF=y
+# ── mbedTLS (DTLS required by OpenThread secure transport) ──
+CONFIG_MBEDTLS_HKDF_C=y
+CONFIG_MBEDTLS_CMAC_C=y
+CONFIG_MBEDTLS_SSL_PROTO_DTLS=y
+CONFIG_MBEDTLS_KEY_EXCHANGE_ECJPAKE=y
+CONFIG_MBEDTLS_ECJPAKE_C=y
 
+# ── mDNS ────────────────────────────────────────────────────
+CONFIG_MDNS_MULTIPLE_INSTANCE=y
+
+# ── WiFi (station — uplink to IP network) ──────────────────
 CONFIG_ENABLE_WIFI_STATION=y
+CONFIG_ENABLE_WIFI_AP=n
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n
 CONFIG_DEFAULT_WIFI_SSID="Boy1212  2.4G"
 CONFIG_DEFAULT_WIFI_PASSWORD="0620380499"
 CONFIG_WIFI_STATION_RECONNECT_INTERVAL=1000
 CONFIG_MAX_SCAN_NETWORKS_RESULTS=3000
 CONFIG_WIFI_SCAN_COMPLETION_TIMEOUT=10000
 
-# Stack sizes (Swift relies on larger stacks for main/ESP-Matter tasks)
+# ── IEEE 802.15.4 radio (Thread PHY on ESP32-C6) ───────────
+CONFIG_IEEE802154_ENABLED=y
+
+# ── OpenThread ──────────────────────────────────────────────
+CONFIG_OPENTHREAD_ENABLED=y
+CONFIG_OPENTHREAD_BORDER_ROUTER=y
+CONFIG_OPENTHREAD_SRP_SERVER=y
+CONFIG_OPENTHREAD_DNS64=y
+CONFIG_OPENTHREAD_LOG_LEVEL_DYNAMIC=n
+CONFIG_OPENTHREAD_LOG_LEVEL_NOTE=y
+
+# ── Thread Border Router ────────────────────────────────────
+CONFIG_ENABLE_THREAD_BORDER_ROUTER=y
+CONFIG_OPENTHREAD_BR_AUTO_START=y
+
+# ── Coexistence (WiFi + 802.15.4 share RF front-end) ───────
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
+
+# ── Button / BSP ────────────────────────────────────────────
+CONFIG_BUTTON_PERIOD_TIME_MS=20
+CONFIG_BUTTON_LONG_PRESS_TIME_MS=5000
+CONFIG_BSP_BUTTONS_NUM=1
+CONFIG_BSP_BUTTON_1_TYPE_GPIO=y
+CONFIG_BSP_BUTTON_1_GPIO=0
+CONFIG_BSP_BUTTON_1_LEVEL=0
+CONFIG_BSP_LEDS_NUM=0
+
+# ── Security ────────────────────────────────────────────────
+CONFIG_ESP_SECURE_CERT_DS_PERIPHERAL=n
+
+# ── Diagnostics / core dump ─────────────────────────────────
+CONFIG_ESP32_ENABLE_COREDUMP_TO_FLASH=y
+CONFIG_ESP32_COREDUMP_DATA_FORMAT_ELF=y
+
+# ── Stack sizes (Swift + Matter + OpenThread need room) ─────
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 CONFIG_CHIP_TASK_STACK_SIZE=16384
 CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192
 CONFIG_ESP_TIMER_TASK_STACK_SIZE=8192
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
-
-# Stack overflow detection (canary at end of stack, caught on context switch)
-CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
+CONFIG_OPENTHREAD_TASK_STACK_SIZE=8192

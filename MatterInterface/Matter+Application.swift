@@ -38,6 +38,11 @@ extension Matter {
                         led.enabled = false
                         print("WiFi connected")
                         printStationIP()
+                        // Initialise the Thread border router once WiFi has
+                        // an IP — sets WiFi as backbone netif, starts the BR
+                        // routing agent, SRP server, and mDNS proxy. The shim
+                        // is idempotent (only runs once).
+                        init_openthread_border_router_shim()
                     } else if result == chip.DeviceLayer.kConnectivity_Lost {
                         led.enabled = true
                         print("WiFi disconnected")

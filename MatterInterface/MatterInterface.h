@@ -79,6 +79,22 @@ void esp_restart_shim(void);
 uint32_t get_free_heap_size_shim(void);
 uint32_t get_min_free_heap_size_shim(void);
 
+// OpenThread Border Router shims
+void set_openthread_platform_config_native_shim(void);
+void init_openthread_border_router_shim(void);
+
+// Create a Thread Border Router endpoint on the Matter node.
+// Returns the endpoint_t pointer (opaque to Swift, used by esp_matter).
+// Must be called before esp_matter::start().
+void *create_thread_border_router_endpoint_shim(void *node);
+
+// Remote on/off monitoring via binding + subscription.
+// When a Matter controller binds this device's endpoint to a remote
+// Thread device, the TBR auto-subscribes to the remote OnOff cluster.
+// cb fires on every state change; ctx is forwarded as-is.
+typedef void (*remote_onoff_cb_t)(bool on_off, void *ctx);
+esp_err_t init_remote_onoff_monitor_shim(remote_onoff_cb_t cb, void *ctx);
+
 #ifdef __cplusplus
 }
 #endif
