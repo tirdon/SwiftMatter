@@ -42,7 +42,10 @@ extension Matter {
                         // an IP — sets WiFi as backbone netif, starts the BR
                         // routing agent, SRP server, and mDNS proxy. The shim
                         // is idempotent (only runs once).
+                        // FIXME: init once, should be if ... {
                         init_openthread_border_router_shim()
+                        printFabricInfo()
+                        // }
                     } else if result == chip.DeviceLayer.kConnectivity_Lost {
                         led.enabled = true
                         print("WiFi disconnected")

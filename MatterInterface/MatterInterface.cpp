@@ -13,22 +13,22 @@
 #include "esp_err.h"
 #include "esp_matter_attribute_utils.h"
 #include "portmacro.h"
-#include <inttypes.h>
-#include <esp_netif.h>
-#include <esp_system.h>
-#include <esp_heap_caps.h>
 #include <app/ReadClient.h>
 #include <app/clusters/bindings/BindingManager.h>
+#include <esp_heap_caps.h>
 #include <esp_matter_client.h>
+#include <esp_netif.h>
+#include <esp_system.h>
+#include <inttypes.h>
 
 // OpenThread Border Router headers
-#include <esp_openthread_types.h>
+#include <esp_matter_feature.h>
 #include <esp_openthread_border_router.h>
 #include <esp_openthread_lock.h>
-#include <esp_matter_feature.h>
+#include <esp_openthread_types.h>
 #include <platform/ESP32/OpenthreadLauncher.h>
-#include <platform/OpenThread/GenericThreadBorderRouterDelegate.h>
 #include <platform/KvsPersistentStorageDelegate.h>
+#include <platform/OpenThread/GenericThreadBorderRouterDelegate.h>
 
 esp_err_t esp_matter::attribute::set_callback_shim(callback_t_shim callback) {
   return set_callback((callback_t)callback);
@@ -66,12 +66,12 @@ void printFabricInfo() {
   const auto &fabricTable = chip::Server::GetInstance().GetFabricTable();
   printf("Fabric count: %u\n", fabricTable.FabricCount());
   for (const auto &fabricInfo : fabricTable) {
-    printf("  Fabric index: %u\n", fabricInfo.GetFabricIndex());
-    printf("    Fabric ID: 0x%" PRIx64 "\n", fabricInfo.GetFabricId());
-    printf("    Compressed Fabric ID: 0x%" PRIx64 "\n",
+    printf(" Fabric index: %u\n", fabricInfo.GetFabricIndex());
+    printf("\tFabric ID: 0x%" PRIx64 "\n", fabricInfo.GetFabricId());
+    printf("\tCompressed Fabric ID: 0x%" PRIx64 "\n",
            fabricInfo.GetCompressedFabricId());
-    printf("    Node ID: 0x%" PRIx64 "\n", fabricInfo.GetNodeId());
-    printf("    Vendor ID: 0x%04x\n", fabricInfo.GetVendorId());
+    printf("\tNode ID: 0x%" PRIx64 "\n", fabricInfo.GetNodeId());
+    printf("\tVendor ID: 0x%04x\n", fabricInfo.GetVendorId());
   }
 }
 
@@ -123,18 +123,13 @@ void portYIELD_FROM_ISR_shim(int32_t xHigherPriorityTaskWoken) {
   }
 }
 
-
 void ulTaskNotifyGive_shim(TaskHandle_t xTaskToNotify) {
   xTaskNotifyGive(xTaskToNotify);
 }
 
-void esp_restart_shim() {
-  esp_restart();
-}
+void esp_restart_shim() { esp_restart(); }
 
-uint32_t get_free_heap_size_shim() {
-  return esp_get_free_heap_size();
-}
+uint32_t get_free_heap_size_shim() { return esp_get_free_heap_size(); }
 
 uint32_t get_min_free_heap_size_shim() {
   return esp_get_minimum_free_heap_size();
@@ -156,7 +151,8 @@ void set_openthread_platform_config_native_shim(void) {
 }
 
 void init_openthread_border_router_shim(void) {
-  if (s_br_initialized) return;
+  if (s_br_initialized)
+    return;
   esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
   if (!netif) {
     printf("[TBR] WiFi STA netif not found, deferring BR init\n");
@@ -172,7 +168,8 @@ void init_openthread_border_router_shim(void) {
 
 void *create_thread_border_router_endpoint_shim(void *node) {
   using namespace chip::app::Clusters;
-  using GenericDelegate = ThreadBorderRouterManagement::GenericOpenThreadBorderRouterDelegate;
+  using GenericDelegate =
+      ThreadBorderRouterManagement::GenericOpenThreadBorderRouterDelegate;
 
   // KVS storage delegate for the TBR delegate's persistent state
   static chip::KvsPersistentStorageDelegate s_tbr_storage;
@@ -198,9 +195,11 @@ void *create_thread_border_router_endpoint_shim(void *node) {
   }
 
   // Enable PAN change feature
-  auto *cluster = esp_matter::cluster::get(ep, ThreadBorderRouterManagement::Id);
+  auto *cluster =
+      esp_matter::cluster::get(ep, ThreadBorderRouterManagement::Id);
   if (cluster) {
-    esp_matter::cluster::thread_border_router_management::feature::pan_change::add(cluster);
+    esp_matter::cluster::thread_border_router_management::feature::pan_change::
+        add(cluster);
   }
 
   printf("[TBR] Thread Border Router endpoint created (id=%u)\n",
@@ -221,33 +220,33 @@ static void *s_remote_onoff_ctx = nullptr;
 // subscribed remote device and forwards them to the Swift callback.
 class OnOffSubscriptionCallback : public chip::app::ReadClient::Callback {
 public:
-    void OnAttributeData(
-        const chip::app::ConcreteDataAttributePath &path,
-        chip::TLV::TLVReader *data,
-        const chip::app::StatusIB &status) override
-    {
-        if (!s_remote_onoff_cb || !data) return;
-        if (path.mClusterId != chip::app::Clusters::OnOff::Id) return;
-        if (path.mAttributeId !=
-            chip::app::Clusters::OnOff::Attributes::OnOff::Id) return;
+  void OnAttributeData(const chip::app::ConcreteDataAttributePath &path,
+                       chip::TLV::TLVReader *data,
+                       const chip::app::StatusIB &status) override {
+    if (!s_remote_onoff_cb || !data)
+      return;
+    if (path.mClusterId != chip::app::Clusters::OnOff::Id)
+      return;
+    if (path.mAttributeId != chip::app::Clusters::OnOff::Attributes::OnOff::Id)
+      return;
 
-        bool val = false;
-        if (data->Get(val) == CHIP_NO_ERROR) {
-            s_remote_onoff_cb(val, s_remote_onoff_ctx);
-        }
+    bool val = false;
+    if (data->Get(val) == CHIP_NO_ERROR) {
+      s_remote_onoff_cb(val, s_remote_onoff_ctx);
     }
+  }
 
-    void OnError(CHIP_ERROR error) override {
-        printf("[TBR] OnOff subscription error\n");
-    }
+  void OnError(CHIP_ERROR error) override {
+    printf("[TBR] OnOff subscription error\n");
+  }
 
-    void OnDone(chip::app::ReadClient *client) override {
-        printf("[TBR] OnOff subscription ended\n");
-    }
+  void OnDone(chip::app::ReadClient *client) override {
+    printf("[TBR] OnOff subscription ended\n");
+  }
 
-    void OnSubscriptionEstablished(chip::SubscriptionId id) override {
-        printf("[TBR] OnOff subscription established (id=%u)\n", (unsigned)id);
-    }
+  void OnSubscriptionEstablished(chip::SubscriptionId id) override {
+    printf("[TBR] OnOff subscription established (id=%u)\n", (unsigned)id);
+  }
 };
 
 static OnOffSubscriptionCallback s_onoff_sub_cb;
@@ -256,43 +255,39 @@ using namespace chip::app::Clusters::Binding;
 
 // Called by BindingManager when a bound device's CASE session is ready.
 // Automatically subscribes to the remote device's OnOff attribute.
-static void on_binding_activated(
-    const TableEntry &entry,
-    chip::OperationalDeviceProxy *peer,
-    void *context)
-{
-    if (entry.type != MATTER_UNICAST_BINDING || !peer) return;
+static void on_binding_activated(const TableEntry &entry,
+                                 chip::OperationalDeviceProxy *peer,
+                                 void *context) {
+  if (entry.type != MATTER_UNICAST_BINDING || !peer)
+    return;
 
-    chip::app::AttributePathParams attrPath;
-    attrPath.mEndpointId  = entry.remote;
-    attrPath.mClusterId   = chip::app::Clusters::OnOff::Id;
-    attrPath.mAttributeId = chip::app::Clusters::OnOff::Attributes::OnOff::Id;
+  chip::app::AttributePathParams attrPath;
+  attrPath.mEndpointId = entry.remote;
+  attrPath.mClusterId = chip::app::Clusters::OnOff::Id;
+  attrPath.mAttributeId = chip::app::Clusters::OnOff::Attributes::OnOff::Id;
 
-    esp_err_t err = esp_matter::client::interaction::subscribe::send_request(
-        peer,
-        &attrPath, 1,      // 1 attribute path
-        nullptr,   0,      // no event paths
-        1,                  // min interval (seconds)
-        30,                 // max interval (seconds)
-        true,               // keep subscription
-        true,               // auto resubscribe
-        s_onoff_sub_cb);
+  esp_err_t err = esp_matter::client::interaction::subscribe::send_request(
+      peer, &attrPath, 1, // 1 attribute path
+      nullptr, 0,         // no event paths
+      1,                  // min interval (seconds)
+      30,                 // max interval (seconds)
+      true,               // keep subscription
+      true,               // auto resubscribe
+      s_onoff_sub_cb);
 
-    if (err == ESP_OK) {
-        printf("[TBR] Subscribed to remote OnOff (endpoint %u)\n",
-               entry.remote);
-    } else {
-        printf("[TBR] Failed to subscribe: 0x%x\n", err);
-    }
+  if (err == ESP_OK) {
+    printf("[TBR] Subscribed to remote OnOff (endpoint %u)\n", entry.remote);
+  } else {
+    printf("[TBR] Failed to subscribe: 0x%x\n", err);
+  }
 }
 
-extern "C" esp_err_t init_remote_onoff_monitor_shim(
-    remote_onoff_cb_t cb, void *ctx)
-{
-    s_remote_onoff_cb  = cb;
-    s_remote_onoff_ctx = ctx;
-    Manager::GetInstance()
-        .RegisterBoundDeviceChangedHandler(on_binding_activated);
-    printf("[TBR] Remote OnOff monitoring initialized\n");
-    return ESP_OK;
+extern "C" esp_err_t init_remote_onoff_monitor_shim(remote_onoff_cb_t cb,
+                                                    void *ctx) {
+  s_remote_onoff_cb = cb;
+  s_remote_onoff_ctx = ctx;
+  Manager::GetInstance().RegisterBoundDeviceChangedHandler(
+      on_binding_activated);
+  printf("[TBR] Remote OnOff monitoring initialized\n");
+  return ESP_OK;
 }
