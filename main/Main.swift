@@ -32,6 +32,22 @@ func main() -> Never {
     print("Thread Border Router starting on ESP32-C6")
 
     // --- System Initialisation ---
+    // NVS is required for event loop and Matter.
+    var err = nvs_flash_init()
+    if err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND {
+        nvs_flash_erase()
+        err = nvs_flash_init()
+    }
+
+    // Initialize the 'fctry' partition used by Matter for DAC/PAI.
+    // "fctry".withCString {
+    //     var err_fctry = nvs_flash_init_partition($0)
+    //     if err_fctry == ESP_ERR_NVS_NO_FREE_PAGES || err_fctry == ESP_ERR_NVS_NEW_VERSION_FOUND {
+    //         nvs_flash_erase_partition($0)
+    //         err_fctry = nvs_flash_init_partition($0)
+    //     }
+    // }
+
     // Essential ESP-IDF initialization for networking and events.
     esp_event_loop_create_default()
 
@@ -39,7 +55,6 @@ func main() -> Never {
 
     // --- Matter Node ---
     // The root node represents this device on the Matter fabric.
-    // NVS is initialised inside Matter.Node.init().
     let rootNode = Matter.Node(name: "Thread Border Router")
     rootNode.identifyHandler = {
         print("identify: Thread Border Router")
@@ -55,8 +70,6 @@ func main() -> Never {
             print("[Switch] \(led.enabled ? "ON" : "OFF")")
         }
     }
-
-    create_thread_border_router_endpoint_shim(rootNode.innerNode.node)
 
     // Configure OpenThread for ESP32-C6 native 802.15.4 radio.
     // Must be called before esp_matter::start() so the Matter stack
@@ -77,6 +90,9 @@ func main() -> Never {
     let app = Matter.Application()
     app.rootNode = rootNode
     app.start()
+
+    // Create TBR endpoint after starting Matter stack
+    create_thread_border_router_endpoint_shim(rootNode.innerNode.node)
 
     // Button on GPIO 0 — toggles LED, local endpoint, and bound remote devices
     startButtonTask(gpio: GPIO_NUM_0, endpointId: switchEndpoint.id, led: led)

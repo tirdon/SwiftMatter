@@ -14,12 +14,6 @@ extension Matter {
         var innerNode: RootNode!
 
         init(name: String = " ") {
-            let err = nvs_flash_init()
-            if err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND {
-                nvs_flash_erase()
-                nvs_flash_init()
-            }
-
             _ = Unmanaged.passRetained(self)
 
             guard let root = RootNode(

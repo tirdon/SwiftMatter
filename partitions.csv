@@ -1,11 +1,10 @@
 # Name,   Type, SubType, Offset,  Size, Flags
-# Note: Firmware partition offset needs to be 64K aligned, initial 36K (9 sectors) are reserved for bootloader and partition table
-# Single factory partition — TBR binary (~2.3 MB) exceeds dual-OTA capacity on 4 MB flash.
+# Note: Firmware partition offset needs to be 64K aligned.
+# Optimized for Thread Border Router on 4MB Flash (No OTA).
 esp_secure_cert,  0x3F, ,0xd000,    0x2000, encrypted
-nvs,      data, nvs,     0x10000,   0xC000,
+nvs,      data, nvs,     0x10000,   0x10000,
 nvs_keys, data, nvs_keys,,          0x1000, encrypted
-otadata,  data, ota,     ,          0x2000
 phy_init, data, phy,     ,          0x1000,
-factory,  app,  factory, 0x20000,   0x3B0000,
-fctry,    data, nvs,     0x3D0000,  0x6000
-coredump, data, coredump,,          64K
+factory,  app,  factory, 0x30000,   0x3BA000,
+fctry,    data, nvs,     ,          0x6000
+coredump, data, coredump,,          0x10000

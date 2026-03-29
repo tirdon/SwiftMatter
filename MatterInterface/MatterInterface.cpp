@@ -177,6 +177,7 @@ void init_openthread_border_router_shim(void) {
 }
 
 void *create_thread_border_router_endpoint_shim(void *node) {
+  esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
   using namespace chip::app::Clusters;
   using GenericDelegate =
       ThreadBorderRouterManagement::GenericOpenThreadBorderRouterDelegate;
