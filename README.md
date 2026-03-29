@@ -1,87 +1,103 @@
-# SwiftMatter — Irrigation Controller
+# SwiftMatter — Thread Border Router
 
-An ESP32-C3/C6 irrigation controller built entirely in **Embedded Swift**, using the [Matter](https://csa-iot.org/all-solutions/matter/) smart home protocol through the ESP-Matter SDK by Espressif. The device exposes an on/off switch (for valve/relay control), a DHT22 temperature/humidity sensor, a DS18B20 waterproof temperature sensor, and a capacitive soil moisture sensor — all as standard Matter endpoints controllable from Apple Home, Google Home, or any Matter-compatible app.
+An ESP32-C6 **Thread Border Router** (TBR) built in **Embedded Swift**, using the [Matter](https://csa-iot.org/all-solutions/matter/) smart home protocol through the ESP-Matter SDK. The device bridges a Thread mesh network (IEEE 802.15.4) to a Wi-Fi/IP network, leveraging the ESP32-C6's dual radios. It exposes a Matter on/off switch endpoint and can auto-subscribe to bound remote Thread devices, mirroring their on/off state on a local LED.
 
 ## Features
 
-- **Matter over Wi-Fi** — commission and control the device from any Matter fabric (Apple Home, Google Home, etc.)
-- **On/Off Switch Endpoint** — toggles external LED / relay on GPIO 9
-- **DHT22 Endpoints** — reports temperature and relative humidity via standard Matter clusters
-- **DS18B20 Endpoint** — reports water/soil temperature using the 1-Wire protocol
-- **Capacitive Soil Moisture Endpoint** — reports soil moisture percentage via ADC
-- **Physical Button** — GPIO 21 button toggles the switch state and reports back to the Matter fabric
-- **Onboard LED** — GPIO 8 status LED indicates Wi-Fi connectivity
-- **IR Receiver (NEC)** — TSOP38238 on GPIO 0, full NEC protocol decode with hold/repeat support, low-power ISR + `ulTaskNotifyTake` pattern
+- **Thread Border Router** — bridges Thread mesh (802.15.4) to Wi-Fi/IP using the ESP32-C6's native dual-radio hardware
+- **Matter over Wi-Fi** — commission and control from any Matter fabric (Apple Home, Google Home, etc.)
+- **On/Off Switch Endpoint** — toggles an external LED / relay on GPIO 16
+- **Remote Device Monitoring** — auto-subscribes to bound Thread devices' OnOff cluster and mirrors state on the local LED
+- **OpenThread Services** — SRP server, DNS64, NAT64, mDNS proxy, border routing agent
+- **Physical Button** — GPIO 0 toggles the switch endpoint
+- **Status LED** — GPIO 15 indicates Wi-Fi connectivity (active-low: lit = disconnected)
+- **Binding Cluster** — controllers can bind this endpoint to remote Thread devices
 
 ## Hardware
 
 | Component | GPIO | Notes |
 |-----------|------|-------|
-| LED / Relay | 9 | Active high |
-| Onboard Status LED | 8 | Active low (on = Wi-Fi disconnected) |
-| Push Button | 21 | Active high, 10 ms debounce, 2 s long press |
-| DHT22 (AM2301) | 4 | Open-drain, ambient temperature + humidity |
-| DS18B20 | *Configurable* | Open-drain, waterproof temperature probe, 1-Wire |
-| Capacitive Soil Moisture | *ADC Channel* | Analog (mapped from 0-4095 to 100%-0%) |
-| IR Receiver (TSOP38238) | 0 | Input with pull-up, NEC protocol, ISR on falling edge |
+| LED / Relay | 16 | Active high, toggled by switch endpoint and remote mirror |
+| Status LED | 15 | Active low (lit = Wi-Fi disconnected) |
+| Push Button | 0 | Active low, pull-up, 50 ms debounce |
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                                  Main.swift                                  │
+│                              app_main() → Never                              │
+│                                                                              │
+│  ┌──────────┐  ┌──────────┐  ┌─────────────────────────────────────────────┐ │
+│  │   LED    │  │  Button  │  │          Remote OnOff Monitor               │ │
+│  │ GPIO 16  │  │  GPIO 0  │  │  Binding → CASE → Subscribe → Mirror LED   │ │
+│  └────┬─────┘  └────┬─────┘  └─────────────────────┬───────────────────────┘ │
+│       │              │                              │                         │
+│  ┌────▼──────────────▼──────────────────────────────▼──────────────────────┐  │
+│  │                            Matter.Node                                  │  │
+│  │  ┌─────────────────┐  ┌──────────────┐                                  │  │
+│  │  │ SwitchEndpoint   │  │   Binding    │                                  │  │
+│  │  │ (OnOff Plug-in)  │  │   Cluster    │                                  │  │
+│  │  └─────────────────┘  └──────────────┘                                  │  │
+│  └────────────────────────────────┬────────────────────────────────────────┘  │
+│                                   │                                           │
+│  ┌────────────────────────────────▼────────────────────────────────────────┐  │
+│  │                         Matter.Application                              │  │
+│  │              esp_matter.start() → Wi-Fi → Fabric → TBR init            │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────────┐ │
+│  │                      OpenThread Border Router                            │ │
+│  │  802.15.4 radio ←→ Thread mesh ←→ WiFi backbone ←→ IP network          │ │
+│  │  SRP server · DNS64 · NAT64 · mDNS proxy · Border routing agent        │ │
+│  └──────────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow
+
+```
+Thread device state change
+  → OpenThread mesh → 802.15.4 radio
+    → Border Router forwards to IP network
+      → Matter subscription delivers OnOff report
+        → Swift callback mirrors state on local LED
+
+Button press (GPIO 0)
+  → FreeRTOS polling task (50 ms debounce)
+    → toggleOnOff() → Matter attribute update
+      → Event handler → LED toggle
+
+Matter controller (Apple Home / Google Home)
+  → Fabric command → SwitchEndpoint event
+    → LED toggle
+```
 
 ## Project Structure
 
 ```
 Irrigation/
 ├── CMakeLists.txt              # Top-level ESP-IDF / ESP-Matter project config
-├── partitions.csv              # Custom partition table (OTA, NVS, coredump)
-├── sdkconfig.defaults          # SDK configuration defaults
+├── partitions.csv              # Custom partition table (factory-only, no OTA)
+├── sdkconfig.defaults          # SDK config: OpenThread, TBR, WiFi, Matter
 │
 ├── main/
 │   ├── CMakeLists.txt          # Component build — Swift compiler flags & source list
-│   ├── BridgingHeader.h        # C/C++ → Swift bridging (FreeRTOS, GPIO, Matter, DHT, RMT)
-│   ├── idf_component.yml       # ESP Component Registry dependencies (dht, cmake_utilities)
+│   ├── BridgingHeader.h        # C/C++ → Swift bridging header
+│   ├── idf_component.yml       # ESP Component Registry dependencies
 │   ├── linker.lf               # Linker fragment
-│   ├── Main.swift              # app_main entry point — wires up endpoints, tasks, button
-│   ├── PhysicalDevices.swift   # LED, Button, DHT22, DS18B20, Soil Moisture, IR drivers
-│   └── SwitchEndpoint.swift    # Matter endpoint definitions (switch, temp, humidity)
+│   ├── Main.swift              # app_main — Matter node, switch endpoint, TBR init, button
+│   └── Button.swift            # GPIO button polling task with debounce
 │
 └── MatterInterface/
-    ├── MatterInterface.h       # C++ shim declarations for esp_matter APIs
-    ├── MatterInterface.cpp     # C++ shim implementations (callback, attribute, report)
+    ├── MatterInterface.h       # C++ shim declarations (Matter, FreeRTOS, OpenThread)
+    ├── MatterInterface.cpp     # C++ shim implementations + remote OnOff subscription
     ├── Core.swift              # Protocol hierarchy (MatterNode/Endpoint/Cluster/Attribute)
-    ├── Core+ID.swift           # Typed ClusterID / AttributeID wrappers, concrete clusters
-    ├── Core+RootNode.swift     # Data model concrete structs (RootNode, Endpoint, etc.)
-    ├── Matter.swift            # Matter.Node event routing, Matter.Endpoint attributes
-    ├── Matter+Application.swift # Matter.Application — start, Wi-Fi event handling
-    └── Matter+OnBoardLED.swift  # Onboard status LED (GPIO 8)
-```
-
-## Architecture
-
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                                       Main.swift                                       │
-│                                   app_main() → Never                                   │
-│                                                                                        │
-│  ┌─────────┐  ┌─────────┐  ┌───────────┐  ┌───────────┐  ┌────────────┐  ┌─────────┐   │
-│  │   LED   │  │ Button  │  │   DHT22   │  │  DS18B20  │  │ Soil Moist │  │   IR    │   │
-│  │ GPIO 9  │  │ GPIO 21 │  │  GPIO 4   │  │  1-Wire   │  │    ADC     │  │ GPIO 0  │   │
-│  └────┬────┘  └────┬────┘  └─────┬─────┘  └─────┬─────┘  └──────┬─────┘  └────┬────┘   │
-│       │            │             │              │               │             │        │
-│       │            │        FreeRTOS task  FreeRTOS task   FreeRTOS task   GPIO ISR +  │
-│       │            │        polls every    polls every     polls every    notify_take  │
-│       │            │            10s            10s             10s      (blocks till)  │
-│       │            │             │              │               │       (falling edge) │
-│  ┌────▼────────────▼─────────────▼──────────────▼───────────────▼─────────────▼─────┐  │
-│  │                                 Matter.Node                                      │  │
-│  │  ┌─────────────┬───────────┬──────────────┬─────────────────┬─────────────────┐  │  │
-│  │  │ SwitchEndpt │ TempEndpt │  HumidEndpt  │ DS18B20_TempEpt │ Moist_HumidEpt  │  │  │
-│  │  │  (OnOff)    │  (DHT22)  │    (DHT22)   │    (DS18B20)    │       (ADC)     │  │  │
-│  │  └─────────────┴───────────┴──────────────┴─────────────────┴─────────────────┘  │  │
-│  └───────────────────────────────────────┬──────────────────────────────────────────┘  │
-│                                          │                                             │
-│  ┌───────────────────────────────────────▼──────────────────────────────────────────┐  │
-│  │                              Matter.Application                                  │  │
-│  │                     esp_matter.start() → Wi-Fi → Fabric                          │  │
-│  └──────────────────────────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────────────────────────┘
+    ├── Core+ID.swift           # Typed ClusterID / AttributeID wrappers
+    ├── Core+RootNode.swift     # Data model concrete structs
+    ├── Matter.swift            # Matter.Node event routing
+    ├── Matter+Application.swift # Matter.Application — start, Wi-Fi events, TBR init
+    └── Matter+OnBoardLED.swift  # Status LED on GPIO 15
 ```
 
 ## Prerequisites
@@ -89,22 +105,23 @@ Irrigation/
 - **ESP-IDF** v5.3+
 - **ESP-Matter** SDK (set `ESP_MATTER_PATH` environment variable)
 - **Swift toolchain** with Embedded Swift support (nightly or 6.0+)
+- **ESP32-C6** board (required for dual-radio Wi-Fi + 802.15.4)
 - CMake 3.29+
 
 ## Building & Flashing
 
 ```bash
 # Set required environment variables
-export TOOLCHAINS=org.swift.<62202602061a swift toolchain in .plist>
-export IDF_PATH=<path to esp>/esp-idf
-export ESP_MATTER_PATH=<path to esp>/esp-matter
+export TOOLCHAINS=org.swift.<version>
+export IDF_PATH=<path>/esp-idf
+export ESP_MATTER_PATH=<path>/esp-matter
 
-# Source ESP-IDF
+# Source ESP-IDF and ESP-Matter
 . $IDF_PATH/export.sh
 . $ESP_MATTER_PATH/export.sh
 
-# Set target (esp32c3 or esp32c6)
-idf.py set-target esp32c3
+# Set target (must be esp32c6 for Thread radio)
+idf.py set-target esp32c6
 
 # Build
 idf.py build
@@ -119,80 +136,97 @@ Key settings in `sdkconfig.defaults`:
 
 | Setting | Value | Description |
 |---------|-------|-------------|
-| `CONFIG_IDF_TARGET` | `esp32c3` | Target chip (override with `set-target`) |
-| `CONFIG_DEFAULT_WIFI_SSID` | — | Wi-Fi network name |
-| `CONFIG_DEFAULT_WIFI_PASSWORD` | — | Wi-Fi password |
+| `CONFIG_IDF_TARGET` | `esp32c6` | Target chip (C6 required for 802.15.4) |
+| `CONFIG_OPENTHREAD_ENABLED` | `y` | Enable OpenThread stack |
+| `CONFIG_OPENTHREAD_BORDER_ROUTER` | `y` | Enable border routing |
+| `CONFIG_OPENTHREAD_SRP_SERVER` | `y` | SRP server for Thread service registration |
+| `CONFIG_OPENTHREAD_DNS64` | `y` | DNS64 for Thread-to-IPv4 name resolution |
+| `CONFIG_IEEE802154_ENABLED` | `y` | Enable 802.15.4 radio PHY |
 | `CONFIG_ENABLE_CHIP_SHELL` | `y` | Matter CLI shell for debugging |
-| `CONFIG_ENABLE_OTA_REQUESTOR` | `y` | OTA firmware updates |
-| `CONFIG_USE_BLE_ONLY_FOR_COMMISSIONING` | `y` | BLE used only during Matter commissioning |
+| `CONFIG_USE_BLE_ONLY_FOR_COMMISSIONING` | `y` | BLE used only during commissioning |
+| `CONFIG_ESP_COEX_SW_COEXIST_ENABLE` | `y` | Wi-Fi + 802.15.4 RF coexistence |
+| `CONFIG_ENABLE_OTA_REQUESTOR` | `n` | OTA disabled (binary exceeds dual-OTA capacity) |
+
+### Stack Sizes
+
+| Task | Size | Notes |
+|------|------|-------|
+| Main | 16 KB | Swift + Matter startup |
+| Matter (CHIP) | 16 KB | Matter stack processing |
+| BLE (NimBLE) | 8 KB | Commissioning only |
+| OpenThread | 8 KB | Thread networking |
+| ESP Timer | 8 KB | System timer callbacks |
 
 ## Matter Commissioning
 
-After flashing, the device will start BLE advertising for Matter commissioning. Use the Apple Home app, Google Home app, or `chip-tool` to commission:
+After flashing, the device starts BLE advertising for Matter commissioning. Use the Apple Home app, Google Home app, or `chip-tool`:
 
 ```bash
-# Using chip-tool
+# Commission via BLE-WiFi
 chip-tool pairing ble-wifi <node-id> <ssid> <password> <setup-pin-code> <discriminator>
 ```
 
-Once commissioned, the device exposes three endpoints:
-1. **On/Off Plug-in Unit** — toggle the irrigation relay
-2. **Temperature Sensor** — DHT22 temperature readings (range: −40°C to 125°C)
-3. **Humidity Sensor** — DHT22 relative humidity readings (range: 0% to 100%)
+Once commissioned, the device exposes:
+1. **On/Off Plug-in Unit** — toggle the LED/relay, with a binding cluster for remote device pairing
 
-## Swift ↔ ESP-Matter Bridging
+### Remote Device Binding
 
-The C++ ESP-Matter SDK doesn't import cleanly into Swift due to type mismatches (`uint32_t` → `UInt` vs `CUnsignedLong`). The `MatterInterface/` directory provides thin C++ shims that normalize the API:
+To mirror a remote Thread device's on/off state on the local LED:
 
-- `set_callback_shim` — wraps the attribute callback with Swift-compatible types
-- `get_shim` — cluster/attribute lookup with `unsigned int` parameters
-- `update_shim` — attribute value updates
-- `report_shim` — attribute reporting to the Matter fabric (for sensor value pushes)
-- `get_val_shim` — attribute value retrieval by endpoint/cluster/attribute ID
+1. Commission both the TBR and the remote Thread device to the same fabric
+2. Create a binding from the TBR's switch endpoint to the remote device's endpoint
+3. The TBR auto-subscribes to the remote device's OnOff attribute (1–30s interval)
+4. State changes on the remote device are reflected on the TBR's LED
+
+## Thread Border Router Startup Sequence
+
+```
+1. app_main()
+2. Matter.Node created, SwitchEndpoint + Binding cluster added
+3. set_openthread_platform_config_native_shim() — configure 802.15.4 native radio
+4. esp_matter::start() — Matter stack, Wi-Fi, BLE commissioning
+5. Wi-Fi connects → init_openthread_border_router_shim():
+   a. Set Wi-Fi STA as backbone netif
+   b. Start border routing agent
+   c. Enable SRP server + mDNS proxy
+6. Button task + remote OnOff monitor started
+7. Sleep forever (FreeRTOS tasks handle everything)
+```
+
+## Swift ↔ C++ Bridging
+
+The C++ ESP-Matter SDK doesn't import cleanly into Swift due to type mismatches (`uint32_t` → `UInt` vs `CUnsignedLong`). The `MatterInterface/` directory provides thin C++ shims:
+
+### Matter Attribute Shims
+
+| Function | Purpose |
+|----------|---------|
+| `set_callback_shim` | Attribute change callbacks with Swift-compatible types |
+| `get_shim` | Cluster/attribute lookup |
+| `update_shim` | Attribute value updates |
+| `report_shim` | Attribute reporting to fabric |
+| `get_val_shim` | Attribute value retrieval |
 
 ### FreeRTOS Shims
 
-FreeRTOS task notification APIs (`ulTaskNotifyTake`, `vTaskNotifyGiveFromISR`, `portYIELD_FROM_ISR`) are C macros that Swift cannot import. The following `extern "C"` wrapper functions are provided:
+FreeRTOS macros are not visible to Swift — these `extern "C"` wrappers are provided:
 
 | Swift Function | Wraps |
 |---|---|
-| `ulTaskNotifyTake_shim(clearOnExit, ticks)` | `ulTaskNotifyTake` — blocks task until notified or timeout |
-| `vTaskNotifyGiveFromISR_shim(handle, &woken)` | `vTaskNotifyGiveFromISR` — sends notification from ISR context |
-| `portYIELD_FROM_ISR_shim(woken)` | `portYIELD_FROM_ISR` — triggers context switch if higher-priority task was woken |
+| `ulTaskNotifyTake_shim(clearOnExit, ticks)` | `ulTaskNotifyTake` — block until notified |
+| `vTaskNotifyGiveFromISR_shim(handle, &woken)` | `vTaskNotifyGiveFromISR` — notify from ISR |
+| `portYIELD_FROM_ISR_shim(woken)` | `portYIELD_FROM_ISR` — context switch if needed |
+| `xTaskCreate_shim(fn, name, stack, arg, prio)` | `xTaskCreate` — create a FreeRTOS task |
+| `vTaskDelay_ms_shim(ms)` | `vTaskDelay(pdMS_TO_TICKS(ms))` |
 
-## IR Receiver (NEC Protocol)
+### OpenThread Border Router Shims
 
-The IR subsystem uses a **TSOP38238** module on GPIO 0 to decode standard NEC infrared remote signals.
-
-### How it works
-
-```
-Remote button press:
-  TSOP38238 pulls GPIO 0 LOW → GPIO ISR fires (falling edge)
-    → ISR disables interrupt, sends task notification
-      → ir_rx_task wakes from ulTaskNotifyTake_shim()
-        → Bit-bang NEC decode (readPulse timing)
-          → handleCommand() dispatches action
-            → 50ms debounce → re-enable interrupt → sleep again
-```
-
-### NEC Frame Format
-
-| Field | Bits | Duration |
-|-------|------|----------|
-| AGC Leader | — | 9ms LOW + 4.5ms HIGH |
-| Address | 8 | LSB first |
-| Address (inverted) | 8 | Error check |
-| Command | 8 | LSB first |
-| Command (inverted) | 8 | Error check |
-| **Repeat code** | — | 9ms LOW + 2.25ms HIGH (button held) |
-
-### Low-Power Design
-
-The IR task uses a **GPIO ISR + `ulTaskNotifyTake`** pattern instead of busy-polling:
-- **Idle**: task is blocked (zero CPU usage), other tasks (Matter, DHT22) run normally
-- **Signal**: hardware interrupt wakes the task instantly on falling edge
-- **Timeout**: after 300ms of no activity, stale repeat state is cleared
+| Function | Purpose |
+|----------|---------|
+| `set_openthread_platform_config_native_shim()` | Configure 802.15.4 native radio mode |
+| `init_openthread_border_router_shim()` | Start border routing, SRP server, mDNS proxy (idempotent) |
+| `create_thread_border_router_endpoint_shim(node)` | Create TBR Matter endpoint with PAN change feature |
+| `init_remote_onoff_monitor_shim(cb, ctx)` | Register binding handler for remote OnOff subscription |
 
 ## License
 

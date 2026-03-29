@@ -79,6 +79,11 @@ void esp_restart_shim(void);
 uint32_t get_free_heap_size_shim(void);
 uint32_t get_min_free_heap_size_shim(void);
 
+// Generic FreeRTOS shims (macros not visible to Swift)
+void xTaskCreate_shim(void (*task)(void *), const char *name, uint32_t stack,
+                      void *arg, uint32_t prio);
+void vTaskDelay_ms_shim(uint32_t ms);
+
 // OpenThread Border Router shims
 void set_openthread_platform_config_native_shim(void);
 void init_openthread_border_router_shim(void);
@@ -88,12 +93,21 @@ void init_openthread_border_router_shim(void);
 // Must be called before esp_matter::start().
 void *create_thread_border_router_endpoint_shim(void *node);
 
-// Remote on/off monitoring via binding + subscription.
-// When a Matter controller binds this device's endpoint to a remote
-// Thread device, the TBR auto-subscribes to the remote OnOff cluster.
-// cb fires on every state change; ctx is forwarded as-is.
+// Client request callbacks for bound-device interaction.
+// Registers callbacks that handle:
+//   INVOKE_CMD  — sends commands (e.g. Toggle) to bound remote devices
+//   SUBSCRIBE   — subscribes to bound devices' OnOff attribute
+// Must be called before esp_matter::start().
 typedef void (*remote_onoff_cb_t)(bool on_off, void *ctx);
-esp_err_t init_remote_onoff_monitor_shim(remote_onoff_cb_t cb, void *ctx);
+void init_client_callbacks_shim(uint16_t endpoint_id,
+                                remote_onoff_cb_t cb, void *ctx);
+
+// Send a Toggle command to all devices bound to the given endpoint.
+void send_bound_toggle_shim(uint16_t endpoint_id);
+
+// Subscribe to the OnOff attribute on all devices bound to the stored endpoint.
+// Call when kBindingsChangedViaCluster fires.
+void subscribe_to_bound_devices_shim(void);
 
 #ifdef __cplusplus
 }

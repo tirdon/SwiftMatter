@@ -13,8 +13,8 @@
 #include "esp_err.h"
 #include "esp_matter_attribute_utils.h"
 #include "portmacro.h"
+#include <app/OperationalSessionSetup.h>
 #include <app/ReadClient.h>
-#include <app/clusters/bindings/BindingManager.h>
 #include <esp_heap_caps.h>
 #include <esp_matter_client.h>
 #include <esp_netif.h>
@@ -135,6 +135,15 @@ uint32_t get_min_free_heap_size_shim() {
   return esp_get_minimum_free_heap_size();
 }
 
+// ── Generic FreeRTOS shims (macros not visible to Swift) ────────────────
+
+void xTaskCreate_shim(void (*task)(void *), const char *name, uint32_t stack,
+                      void *arg, uint32_t prio) {
+  xTaskCreate(task, name, stack, arg, prio, NULL);
+}
+
+void vTaskDelay_ms_shim(uint32_t ms) { vTaskDelay(pdMS_TO_TICKS(ms)); }
+
 // ── OpenThread Border Router shims ──────────────────────────────────────
 
 static bool s_br_initialized = false;
@@ -210,11 +219,13 @@ void *create_thread_border_router_endpoint_shim(void *node) {
 } // extern "C"
 
 // ---------------------------------------------------------------------------
-// Remote on/off monitoring — binding + subscription
+// Client request callbacks — invoke + subscribe to bound devices
 // ---------------------------------------------------------------------------
 
 static remote_onoff_cb_t s_remote_onoff_cb = nullptr;
 static void *s_remote_onoff_ctx = nullptr;
+static uint16_t s_local_endpoint_id = 0;
+static bool s_subscribed = false;
 
 // ReadClient::Callback that decodes OnOff attribute reports from the
 // subscribed remote device and forwards them to the Swift callback.
@@ -251,43 +262,81 @@ public:
 
 static OnOffSubscriptionCallback s_onoff_sub_cb;
 
-using namespace chip::app::Clusters::Binding;
-
-// Called by BindingManager when a bound device's CASE session is ready.
-// Automatically subscribes to the remote device's OnOff attribute.
-static void on_binding_activated(const TableEntry &entry,
-                                 chip::OperationalDeviceProxy *peer,
-                                 void *context) {
-  if (entry.type != MATTER_UNICAST_BINDING || !peer)
-    return;
-
-  chip::app::AttributePathParams attrPath;
-  attrPath.mEndpointId = entry.remote;
-  attrPath.mClusterId = chip::app::Clusters::OnOff::Id;
-  attrPath.mAttributeId = chip::app::Clusters::OnOff::Attributes::OnOff::Id;
-
-  esp_err_t err = esp_matter::client::interaction::subscribe::send_request(
-      peer, &attrPath, 1, // 1 attribute path
-      nullptr, 0,         // no event paths
-      1,                  // min interval (seconds)
-      30,                 // max interval (seconds)
-      true,               // keep subscription
-      true,               // auto resubscribe
-      s_onoff_sub_cb);
-
-  if (err == ESP_OK) {
-    printf("[TBR] Subscribed to remote OnOff (endpoint %u)\n", entry.remote);
-  } else {
-    printf("[TBR] Failed to subscribe: 0x%x\n", err);
+// Unicast request callback — called by esp_matter binding manager after CASE
+// session is established. Dispatches invoke or subscribe depending on type.
+static void on_client_request(esp_matter::client::peer_device_t *peer_device,
+                              esp_matter::client::request_handle_t *req_handle,
+                              void *priv_data) {
+  if (req_handle->type == esp_matter::client::INVOKE_CMD) {
+    esp_matter::client::interaction::invoke::send_request(
+        NULL, peer_device, req_handle->command_path, "{}",
+        [](void *, const chip::app::ConcreteCommandPath &,
+           const chip::app::StatusIB &, chip::TLV::TLVReader *) {
+          printf("[TBR] Toggle sent OK\n");
+        },
+        [](void *, CHIP_ERROR) { printf("[TBR] Toggle send failed\n"); },
+        chip::NullOptional);
+  } else if (req_handle->type == esp_matter::client::SUBSCRIBE_ATTR) {
+    esp_matter::client::interaction::subscribe::send_request(
+        peer_device, &req_handle->attribute_path, 1, nullptr, 0, 1, 30, true,
+        true, s_onoff_sub_cb);
+    printf("[TBR] Subscribed to remote OnOff\n");
   }
 }
 
-extern "C" esp_err_t init_remote_onoff_monitor_shim(remote_onoff_cb_t cb,
-                                                    void *ctx) {
+// Group request callback — sends group commands for multicast bindings.
+static void
+on_group_request(uint8_t fabric_index,
+                 esp_matter::client::request_handle_t *req_handle,
+                 void *priv_data) {
+  if (req_handle->type != esp_matter::client::INVOKE_CMD)
+    return;
+  esp_matter::client::interaction::invoke::send_group_request(
+      fabric_index, req_handle->command_path, "{}");
+  printf("[TBR] Group toggle sent\n");
+}
+
+extern "C" void init_client_callbacks_shim(uint16_t endpoint_id,
+                                           remote_onoff_cb_t cb, void *ctx) {
+  s_local_endpoint_id = endpoint_id;
   s_remote_onoff_cb = cb;
   s_remote_onoff_ctx = ctx;
-  Manager::GetInstance().RegisterBoundDeviceChangedHandler(
-      on_binding_activated);
-  printf("[TBR] Remote OnOff monitoring initialized\n");
-  return ESP_OK;
+  esp_matter::client::set_request_callback(on_client_request, on_group_request,
+                                           NULL);
+  printf("[TBR] Client callbacks initialized (endpoint %u)\n", endpoint_id);
+}
+
+extern "C" void send_bound_toggle_shim(uint16_t endpoint_id) {
+  esp_matter::client::request_handle_t req_handle;
+  req_handle.type = esp_matter::client::INVOKE_CMD;
+  req_handle.command_path.mClusterId = chip::app::Clusters::OnOff::Id;
+  req_handle.command_path.mCommandId =
+      chip::app::Clusters::OnOff::Commands::Toggle::Id;
+
+  esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
+  esp_err_t err = esp_matter::client::cluster_update(endpoint_id, &req_handle);
+  if (err != ESP_OK) {
+    printf("[TBR] send_bound_toggle failed: 0x%x\n", err);
+  }
+}
+
+extern "C" void subscribe_to_bound_devices_shim(void) {
+  if (s_local_endpoint_id == 0 || s_subscribed)
+    return;
+
+  esp_matter::client::request_handle_t req_handle;
+  req_handle.type = esp_matter::client::SUBSCRIBE_ATTR;
+  req_handle.attribute_path.mClusterId = chip::app::Clusters::OnOff::Id;
+  req_handle.attribute_path.mAttributeId =
+      chip::app::Clusters::OnOff::Attributes::OnOff::Id;
+
+  esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
+  esp_err_t err =
+      esp_matter::client::cluster_update(s_local_endpoint_id, &req_handle);
+  if (err == ESP_OK) {
+    s_subscribed = true;
+    printf("[TBR] Subscription request sent to bound devices\n");
+  } else {
+    printf("[TBR] subscribe_to_bound failed: 0x%x\n", err);
+  }
 }

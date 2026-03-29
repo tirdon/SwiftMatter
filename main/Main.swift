@@ -44,7 +44,7 @@ final class LED: GPIO {
 }
 
 // MARK: - Switch Endpoint
-// FIXME: add binding cluster
+
 extension Matter {
     final class SwitchEndpoint: Endpoint {
         init(rootNode: Node) {
@@ -57,6 +57,15 @@ extension Matter {
                 UInt8(esp_matter.ENDPOINT_FLAG_NONE.rawValue),
                 Unmanaged.passRetained(rootNode.innerNode.context).toOpaque()
             )
+
+            // Binding cluster lets controllers bind this endpoint to remote devices
+            var bindingConfig = esp_matter.cluster.binding.config_t()
+            esp_matter.cluster.binding.create(
+                endpoint,
+                &bindingConfig,
+                UInt8(esp_matter.CLUSTER_FLAG_SERVER.rawValue)
+            )
+            print("[TBR] Binding cluster added")
 
             super.init(rootNode: rootNode, endpoint: esp_matter.endpoint.get_id(endpoint))
         }
@@ -80,39 +89,37 @@ func main() -> Never {
         print("identify: Thread Border Router")
     }
 
-    // Thread Border Router endpoint — exposes ThreadBorderRouterManagement
-    // cluster so Matter controllers can manage Thread datasets.
-    // let tbrEndpoint = create_thread_border_router_endpoint_shim(rootNode.innerNode.node)
-    // if tbrEndpoint == nil {
-    //     print("WARNING: Failed to create TBR endpoint")
-    // }
-
     let switchEndpoint = Matter.SwitchEndpoint(rootNode: rootNode)
     rootNode.addEndpoint(switchEndpoint)
+
+    // Handle on/off events from fabric (Home app toggle) → LED
+    switchEndpoint.eventHandler = { event in
+        if case .onOff = event.attribute {
+            led.enabled = event.value != 0
+            print("[Switch] \(led.enabled ? "ON" : "OFF")")
+        }
+    }
 
     // Configure OpenThread for ESP32-C6 native 802.15.4 radio.
     // Must be called before esp_matter::start() so the Matter stack
     // knows how to initialise the OpenThread platform layer.
     set_openthread_platform_config_native_shim()
 
-    let app = Matter.Application()
-    app.rootNode = rootNode
-    app.start()
-
-    //FIXME: add button to toggle LED and switch endpoint
-    
-
-    // Subscribe to bound remote device's OnOff attribute.
-    // When the controller creates a binding from this endpoint to a
-    // remote Thread device, the TBR auto-subscribes and mirrors the
-    // remote on/off state on the local LED.
-    // FIXME: support foreach, for multiple remote devices but access only one by fabricID and NodeID
-    init_remote_onoff_monitor_shim({ onOff, ctx in
+    // Register client callbacks for sending commands and subscribing to
+    // bound remote Thread devices. Must be called before esp_matter::start().
+    init_client_callbacks_shim(switchEndpoint.id, { onOff, ctx in
         guard let ctx else { return }
         let led = Unmanaged<LED>.fromOpaque(ctx).takeUnretainedValue()
         led.enabled = onOff
         print("[TBR] Remote device: \(onOff ? "ON" : "OFF")")
     }, Unmanaged.passUnretained(led).toOpaque())
+
+    let app = Matter.Application()
+    app.rootNode = rootNode
+    app.start()
+
+    // Button on GPIO 0 — toggles LED, local endpoint, and bound remote devices
+    startButtonTask(gpio: GPIO_NUM_0, endpointId: switchEndpoint.id, led: led)
 
     while true { sleep(1) }
 }

@@ -40,16 +40,18 @@ extension Matter {
                         printStationIP()
                         // Initialise the Thread border router once WiFi has
                         // an IP — sets WiFi as backbone netif, starts the BR
-                        // routing agent, SRP server, and mDNS proxy. The shim
-                        // is idempotent (only runs once).
-                        // FIXME: init once, should be if ... {
+                        // routing agent, SRP server, and mDNS proxy.
+                        // Idempotent — s_br_initialized guard in C++ shim.
                         init_openthread_border_router_shim()
                         printFabricInfo()
-                        // }
                     } else if result == chip.DeviceLayer.kConnectivity_Lost {
                         led.enabled = true
                         print("WiFi disconnected")
                     }
+
+                case Int(chip.DeviceLayer.DeviceEventType.kBindingsChangedViaCluster.rawValue):
+                    print("Binding entry changed — subscribing to bound devices")
+                    subscribe_to_bound_devices_shim()
 
                 default:
                     break
