@@ -91,6 +91,9 @@ func main() -> Never {
     app.rootNode = rootNode
     app.start()
 
+    // Wait for Matter stack to fully settle before adding components.
+    vTaskDelay_ms_shim(500)
+
     // Create TBR endpoint after starting Matter stack
     create_thread_border_router_endpoint_shim(rootNode.innerNode.node)
 
