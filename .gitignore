@@ -8,3 +8,4 @@ sdkconfig.defaults
 dependencies.lock
 .vscode/**
 .claude/**
+GEMINI.md

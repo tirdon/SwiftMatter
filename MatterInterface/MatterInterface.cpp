@@ -16,6 +16,7 @@
 #include <app/OperationalSessionSetup.h>
 #include <app/ReadClient.h>
 #include <esp_heap_caps.h>
+#include <app/clusters/bindings/binding-table.h>
 #include <esp_matter_client.h>
 #include <esp_netif.h>
 #include <esp_system.h>
@@ -66,7 +67,7 @@ void printFabricInfo() {
   const auto &fabricTable = chip::Server::GetInstance().GetFabricTable();
   printf("Fabric count: %u\n", fabricTable.FabricCount());
   for (const auto &fabricInfo : fabricTable) {
-    printf(" Fabric index: %u\n", fabricInfo.GetFabricIndex());
+    printf("    Fabric index: %u\n", fabricInfo.GetFabricIndex());
     printf("\tFabric ID: 0x%" PRIx64 "\n", fabricInfo.GetFabricId());
     printf("\tCompressed Fabric ID: 0x%" PRIx64 "\n",
            fabricInfo.GetCompressedFabricId());
@@ -123,7 +124,7 @@ void portYIELD_FROM_ISR_shim(int32_t xHigherPriorityTaskWoken) {
   }
 }
 
-void ulTaskNotifyGive_shim(TaskHandle_t xTaskToNotify) {
+void xTaskNotifyGive_shim(TaskHandle_t xTaskToNotify) {
   xTaskNotifyGive(xTaskToNotify);
 }
 
@@ -271,9 +272,8 @@ static void on_client_request(esp_matter::client::peer_device_t *peer_device,
     esp_matter::client::interaction::invoke::send_request(
         NULL, peer_device, req_handle->command_path, "{}",
         [](void *, const chip::app::ConcreteCommandPath &,
-           const chip::app::StatusIB &, chip::TLV::TLVReader *) {
-          printf("[TBR] Toggle sent OK\n");
-        },
+           const chip::app::StatusIB &,
+           chip::TLV::TLVReader *) { printf("[TBR] Toggle sent OK\n"); },
         [](void *, CHIP_ERROR) { printf("[TBR] Toggle send failed\n"); },
         chip::NullOptional);
   } else if (req_handle->type == esp_matter::client::SUBSCRIBE_ATTR) {
@@ -285,10 +285,9 @@ static void on_client_request(esp_matter::client::peer_device_t *peer_device,
 }
 
 // Group request callback — sends group commands for multicast bindings.
-static void
-on_group_request(uint8_t fabric_index,
-                 esp_matter::client::request_handle_t *req_handle,
-                 void *priv_data) {
+static void on_group_request(uint8_t fabric_index,
+                             esp_matter::client::request_handle_t *req_handle,
+                             void *priv_data) {
   if (req_handle->type != esp_matter::client::INVOKE_CMD)
     return;
   esp_matter::client::interaction::invoke::send_group_request(
@@ -306,6 +305,29 @@ extern "C" void init_client_callbacks_shim(uint16_t endpoint_id,
   printf("[TBR] Client callbacks initialized (endpoint %u)\n", endpoint_id);
 }
 
+extern "C" void print_bindings_shim(uint16_t endpoint_id) {
+  using namespace chip::app::Clusters::Binding;
+  esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
+  auto &bindingTable = Table::GetInstance();
+  printf("[TBR] Current bindings for endpoint %u:\n", endpoint_id);
+  int count = 0;
+  for (auto &entry : bindingTable) {
+    if (entry.local == endpoint_id) {
+      count++;
+      if (entry.type == MATTER_UNICAST_BINDING) {
+        printf("  %d. Node 0x%016llX (Endpoint %u) for Cluster 0x%08lX\n",
+               count, entry.nodeId, entry.remote, entry.clusterId.value_or(0));
+      } else if (entry.type == MATTER_MULTICAST_BINDING) {
+        printf("  %d. Group ID %u for Cluster 0x%08lX\n", count, entry.groupId,
+               entry.clusterId.value_or(0));
+      }
+    }
+  }
+  if (count == 0) {
+    printf("  (none)\n");
+  }
+}
+
 extern "C" void send_bound_toggle_shim(uint16_t endpoint_id) {
   esp_matter::client::request_handle_t req_handle;
   req_handle.type = esp_matter::client::INVOKE_CMD;
@@ -321,8 +343,9 @@ extern "C" void send_bound_toggle_shim(uint16_t endpoint_id) {
 }
 
 extern "C" void subscribe_to_bound_devices_shim(void) {
-  if (s_local_endpoint_id == 0 || s_subscribed)
+  if (s_local_endpoint_id == 0)
     return;
+  s_subscribed = false;
 
   esp_matter::client::request_handle_t req_handle;
   req_handle.type = esp_matter::client::SUBSCRIBE_ATTR;

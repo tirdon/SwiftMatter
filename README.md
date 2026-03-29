@@ -24,34 +24,34 @@ An ESP32-C6 **Thread Border Router** (TBR) built in **Embedded Swift**, using th
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                                  Main.swift                                  │
-│                              app_main() → Never                              │
-│                                                                              │
-│  ┌──────────┐  ┌──────────┐  ┌─────────────────────────────────────────────┐ │
-│  │   LED    │  │  Button  │  │          Remote OnOff Monitor               │ │
-│  │ GPIO 16  │  │  GPIO 0  │  │  Binding → CASE → Subscribe → Mirror LED   │ │
-│  └────┬─────┘  └────┬─────┘  └─────────────────────┬───────────────────────┘ │
-│       │              │                              │                         │
-│  ┌────▼──────────────▼──────────────────────────────▼──────────────────────┐  │
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                                  Main.swift                                   │
+│                              app_main() → Never                               │
+│                                                                               │
+│  ┌──────────┐  ┌──────────┐  ┌─────────────────────────────────────────────┐  │
+│  │   LED    │  │  Button  │  │          Remote OnOff Monitor               │  │
+│  │ GPIO 16  │  │  GPIO 0  │  │  Binding → CASE → Subscribe → Mirror LED    │  │
+│  └────┬─────┘  └────┬─────┘  └─────────────────────┬───────────────────────┘  │
+│       │             │                              │                          │
+│  ┌────▼─────────────▼──────────────────────────────▼───────────────────────┐  │
 │  │                            Matter.Node                                  │  │
 │  │  ┌─────────────────┐  ┌──────────────┐                                  │  │
-│  │  │ SwitchEndpoint   │  │   Binding    │                                  │  │
-│  │  │ (OnOff Plug-in)  │  │   Cluster    │                                  │  │
+│  │  │ SwitchEndpoint  │  │   Binding    │                                  │  │
+│  │  │ (OnOff Plug-in) │  │   Cluster    │                                  │  │
 │  │  └─────────────────┘  └──────────────┘                                  │  │
 │  └────────────────────────────────┬────────────────────────────────────────┘  │
 │                                   │                                           │
 │  ┌────────────────────────────────▼────────────────────────────────────────┐  │
 │  │                         Matter.Application                              │  │
-│  │              esp_matter.start() → Wi-Fi → Fabric → TBR init            │  │
-│  └────────────────────────────────────────────────────────────────────────┘  │
-│                                                                              │
+│  │              esp_matter.start() → Wi-Fi → Fabric → TBR init             │  │
+│  └─────────────────────────────────────────────────────────────────────────┘  │
+│                                                                               │
 │  ┌──────────────────────────────────────────────────────────────────────────┐ │
 │  │                      OpenThread Border Router                            │ │
-│  │  802.15.4 radio ←→ Thread mesh ←→ WiFi backbone ←→ IP network          │ │
-│  │  SRP server · DNS64 · NAT64 · mDNS proxy · Border routing agent        │ │
+│  │  802.15.4 radio ←→ Thread mesh ←→ WiFi backbone ←→ IP network            │ │
+│  │  SRP server · DNS64 · NAT64 · mDNS proxy · Border routing agent          │ │
 │  └──────────────────────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────────────┘
+└───────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Data Flow
@@ -178,6 +178,18 @@ To mirror a remote Thread device's on/off state on the local LED:
 3. The TBR auto-subscribes to the remote device's OnOff attribute (1–30s interval)
 4. State changes on the remote device are reflected on the TBR's LED
 
+### Identifying Bound Devices
+
+You can identify which devices are currently bound to your TBR by inspecting the Matter Binding Table. This is useful for verifying that a controller (like Apple Home) has successfully configured the device to control or monitor another.
+
+- Use the `print_bindings_shim(endpoint_id)` function to log all active bindings to the serial console.
+- Output includes the **Node ID** (unique device address), **Remote Endpoint**, and **Cluster ID** (e.g., `0x0006` for OnOff).
+- Example console output:
+  ```text
+  [TBR] Current bindings for endpoint 1:
+    1. Node 0x0000000000001234 (Endpoint 1) for Cluster 0x00000006
+  ```
+
 ## Thread Border Router Startup Sequence
 
 ```
@@ -226,7 +238,9 @@ FreeRTOS macros are not visible to Swift — these `extern "C"` wrappers are pro
 | `set_openthread_platform_config_native_shim()` | Configure 802.15.4 native radio mode |
 | `init_openthread_border_router_shim()` | Start border routing, SRP server, mDNS proxy (idempotent) |
 | `create_thread_border_router_endpoint_shim(node)` | Create TBR Matter endpoint with PAN change feature |
-| `init_remote_onoff_monitor_shim(cb, ctx)` | Register binding handler for remote OnOff subscription |
+| `init_client_callbacks_shim(id, cb, ctx)` | Register binding handler for remote OnOff subscription |
+| `print_bindings_shim(id)` | Print all current bindings for an endpoint to the console |
+| `subscribe_to_bound_devices_shim()` | Manually trigger subscription to all bound devices |
 
 ## License
 

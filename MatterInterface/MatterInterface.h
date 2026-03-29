@@ -72,7 +72,7 @@ uint32_t ulTaskNotifyTake_shim(int32_t xClearCountOnExit,
 void vTaskNotifyGiveFromISR_shim(TaskHandle_t xTaskToNotify,
                                  int32_t *pxHigherPriorityTaskWoken);
 void portYIELD_FROM_ISR_shim(int32_t xHigherPriorityTaskWoken);
-void ulTaskNotifyGive_shim(TaskHandle_t xTaskToNotify);
+void xTaskNotifyGive_shim(TaskHandle_t xTaskToNotify);
 
 // Crash recovery and heap monitoring shims
 void esp_restart_shim(void);
@@ -99,14 +99,16 @@ void *create_thread_border_router_endpoint_shim(void *node);
 //   SUBSCRIBE   — subscribes to bound devices' OnOff attribute
 // Must be called before esp_matter::start().
 typedef void (*remote_onoff_cb_t)(bool on_off, void *ctx);
-void init_client_callbacks_shim(uint16_t endpoint_id,
-                                remote_onoff_cb_t cb, void *ctx);
+void init_client_callbacks_shim(uint16_t endpoint_id, remote_onoff_cb_t cb,
+                                void *ctx);
 
 // Send a Toggle command to all devices bound to the given endpoint.
 void send_bound_toggle_shim(uint16_t endpoint_id);
 
+// Print all current bindings for a local endpoint to the console.
+void print_bindings_shim(uint16_t endpoint_id);
+
 // Subscribe to the OnOff attribute on all devices bound to the stored endpoint.
-// Call when kBindingsChangedViaCluster fires.
 void subscribe_to_bound_devices_shim(void);
 
 #ifdef __cplusplus
