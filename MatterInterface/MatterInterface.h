@@ -85,6 +85,7 @@ void xTaskCreate_shim(void (*task)(void *), const char *name, uint32_t stack,
 void vTaskDelay_ms_shim(uint32_t ms);
 
 // OpenThread Border Router shims
+void register_eventfd_shim(void);
 void set_openthread_platform_config_native_shim(void);
 void init_openthread_border_router_shim(void);
 
@@ -104,6 +105,9 @@ void init_client_callbacks_shim(uint16_t endpoint_id, remote_onoff_cb_t cb,
 
 // Send a Toggle command to all devices bound to the given endpoint.
 void send_bound_toggle_shim(uint16_t endpoint_id);
+
+// Send a MoveToLevel command to all devices bound to the given endpoint.
+void send_bound_level_shim(uint16_t endpoint_id, uint8_t level);
 
 // Print all current bindings for a local endpoint to the console.
 void print_bindings_shim(uint16_t endpoint_id);

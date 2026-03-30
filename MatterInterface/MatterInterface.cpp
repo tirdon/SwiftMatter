@@ -15,11 +15,12 @@
 #include "portmacro.h"
 #include <app/OperationalSessionSetup.h>
 #include <app/ReadClient.h>
-#include <esp_heap_caps.h>
 #include <app/clusters/bindings/binding-table.h>
+#include <esp_heap_caps.h>
 #include <esp_matter_client.h>
 #include <esp_netif.h>
 #include <esp_system.h>
+#include <esp_vfs_eventfd.h>
 #include <inttypes.h>
 
 // OpenThread Border Router headers
@@ -149,7 +150,16 @@ void vTaskDelay_ms_shim(uint32_t ms) { vTaskDelay(pdMS_TO_TICKS(ms)); }
 
 static bool s_br_initialized = false;
 
+void register_eventfd_shim(void) {
+  esp_vfs_eventfd_config_t eventfd_config = {
+      .max_fds = 3,
+  };
+  ESP_ERROR_CHECK(esp_vfs_eventfd_register(&eventfd_config));
+  printf("[TBR] VFS eventfd registered (max_fds=3)\n");
+}
+
 void set_openthread_platform_config_native_shim(void) {
+#if CHIP_DEVICE_CONFIG_ENABLE_THREAD
   esp_openthread_platform_config_t config = {};
   config.radio_config.radio_mode = RADIO_MODE_NATIVE;
   config.host_config.host_connection_mode = HOST_CONNECTION_MODE_NONE;
@@ -157,6 +167,7 @@ void set_openthread_platform_config_native_shim(void) {
   config.port_config.netif_queue_size = 10;
   config.port_config.task_queue_size = 10;
   set_openthread_platform_config(&config);
+#endif
   printf("[TBR] OpenThread platform config set (native radio)\n");
 }
 
@@ -177,7 +188,8 @@ void init_openthread_border_router_shim(void) {
 }
 
 void *create_thread_border_router_endpoint_shim(void *node) {
-  esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
+  // No ScopedChipStackLock here — this is called during data model setup,
+  // before esp_matter::start(), so the chip platform layer is not yet running.
   using namespace chip::app::Clusters;
   using GenericDelegate =
       ThreadBorderRouterManagement::GenericOpenThreadBorderRouterDelegate;
@@ -270,13 +282,28 @@ static void on_client_request(esp_matter::client::peer_device_t *peer_device,
                               esp_matter::client::request_handle_t *req_handle,
                               void *priv_data) {
   if (req_handle->type == esp_matter::client::INVOKE_CMD) {
-    esp_matter::client::interaction::invoke::send_request(
-        NULL, peer_device, req_handle->command_path, "{}",
-        [](void *, const chip::app::ConcreteCommandPath &,
-           const chip::app::StatusIB &,
-           chip::TLV::TLVReader *) { printf("[TBR] Toggle sent OK\n"); },
-        [](void *, CHIP_ERROR) { printf("[TBR] Toggle send failed\n"); },
-        chip::NullOptional);
+    if (req_handle->command_path.mClusterId == chip::app::Clusters::OnOff::Id) {
+      esp_matter::client::interaction::invoke::send_request(
+          NULL, peer_device, req_handle->command_path, "{}",
+          [](void *, const chip::app::ConcreteCommandPath &,
+             const chip::app::StatusIB &,
+             chip::TLV::TLVReader *) { printf("[TBR] Toggle sent OK\n"); },
+          [](void *, CHIP_ERROR) { printf("[TBR] Toggle send failed\n"); },
+          chip::NullOptional);
+    } else if (req_handle->command_path.mClusterId ==
+               chip::app::Clusters::LevelControl::Id) {
+      char command_data[64];
+      uint8_t level = (uint8_t)(reinterpret_cast<uintptr_t>(priv_data));
+      snprintf(command_data, sizeof(command_data),
+               "{\"0\": %u, \"1\": 0, \"2\": 0, \"3\": 0}", level);
+      esp_matter::client::interaction::invoke::send_request(
+          NULL, peer_device, req_handle->command_path, command_data,
+          [](void *, const chip::app::ConcreteCommandPath &,
+             const chip::app::StatusIB &,
+             chip::TLV::TLVReader *) { printf("[TBR] Level sent OK\n"); },
+          [](void *, CHIP_ERROR) { printf("[TBR] Level send failed\n"); },
+          chip::NullOptional);
+    }
   } else if (req_handle->type == esp_matter::client::SUBSCRIBE_ATTR) {
     esp_matter::client::interaction::subscribe::send_request(
         peer_device, &req_handle->attribute_path, 1, nullptr, 0, 1, 30, true,
@@ -340,6 +367,22 @@ extern "C" void send_bound_toggle_shim(uint16_t endpoint_id) {
   esp_err_t err = esp_matter::client::cluster_update(endpoint_id, &req_handle);
   if (err != ESP_OK) {
     printf("[TBR] send_bound_toggle failed: 0x%x\n", err);
+  }
+}
+
+extern "C" void send_bound_level_shim(uint16_t endpoint_id, uint8_t level) {
+  esp_matter::client::request_handle_t req_handle;
+  req_handle.type = esp_matter::client::INVOKE_CMD;
+  req_handle.command_path.mClusterId = chip::app::Clusters::LevelControl::Id;
+  req_handle.command_path.mCommandId =
+      chip::app::Clusters::LevelControl::Commands::MoveToLevel::Id;
+  req_handle.request_data =
+      reinterpret_cast<void *>(static_cast<uintptr_t>(level));
+
+  esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
+  esp_err_t err = esp_matter::client::cluster_update(endpoint_id, &req_handle);
+  if (err != ESP_OK) {
+    printf("[TBR] send_bound_level failed: 0x%x\n", err);
   }
 }
 

@@ -31,12 +31,11 @@
 #include <driver/gpio.h>
 #include <driver/rmt_rx.h> // rx = receive, tx = transmit
 #include <driver/rmt_tx.h>
+#include <iot_button.h>
 #include <nvs_flash.h>
 #include <sdkconfig.h>
-// #include <driver/rmt.h>
-#include <iot_button.h>
 
-#include <dht.h>
+// #include <dht.h>
 
 // ESP IDF
 // ==================================================

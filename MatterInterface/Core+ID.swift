@@ -8,6 +8,9 @@ struct ClusterID<Cluster: MatterCluster>: RawRepresentable {
 
     static var identify: ClusterID<Identify> { .init(rawValue: chip.app.Clusters.Identify.Id) }
     static var onOff: ClusterID<OnOffControl> { .init(rawValue: chip.app.Clusters.OnOff.Id) }
+    static var levelControl: ClusterID<LevelControl> {
+        .init(rawValue: chip.app.Clusters.LevelControl.Id)
+    }
 }
 
 // MARK: - Attribute ID
@@ -38,4 +41,19 @@ struct OnOffControl: MatterConcreteCluster {
     }
 
     var onOffState: OnOffState { attribute(OnOffControl.onOff) }
+}
+
+struct LevelControl: MatterConcreteCluster {
+    static var clusterId: ClusterID<Self> { .levelControl }
+    let cluster: UnsafeMutablePointer<esp_matter.cluster_t>
+
+    struct CurrentLevel: MatterAttribute {
+        let attribute: UnsafeMutablePointer<esp_matter.attribute_t>
+    }
+
+    static var currentLevel: AttributeID<CurrentLevel> {
+        .init(rawValue: chip.app.Clusters.LevelControl.Attributes.CurrentLevel.Id)
+    }
+
+    var currentLevel: CurrentLevel { attribute(LevelControl.currentLevel) }
 }

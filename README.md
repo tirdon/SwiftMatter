@@ -242,6 +242,28 @@ FreeRTOS macros are not visible to Swift — these `extern "C"` wrappers are pro
 | `print_bindings_shim(id)` | Print all current bindings for an endpoint to the console |
 | `subscribe_to_bound_devices_shim()` | Manually trigger subscription to all bound devices |
 
+## Write the Binding Entry on the Controlling Device (e.g., Switch - node2)
+This command tells the switch which device and endpoint to control.
+```bash
+./chip-tool binding write binding ' [{"node" : 1 , "cluster" : 6 , "endpoint" : 1}] ' 2 1
+```
+node: The Node ID of the device being controlled (e.g., 1 for the light bulb).
+cluster: The ID of the cluster to be controlled (e.g., 6 for On/Off).
+endpoint: The endpoint ID on the controlled device (e.g., 1).
+2: The Node ID of the device where the binding table is being written (the switch).
+1: The endpoint ID on the switch that is performing the control action.
+## Write the Access Control List (ACL) on the Controlled Device (e.g., Light Bulb - node1)
+This command grants permission to the controlling device (node2) to send unicast commands to the controlled device (node1).
+```bash
+./chip-tool accesscontrol write acl ' [{"privilege": 3, "authMode": 2, "subjects": [2], "targets": [{"cluster": 6, "endpoint": 1}]}] ' 1 0
+```
+"privilege": 3: Grants "Operate" privilege.
+"authMode": 2: Specifies "CASE" (Certificate Authenticated Session Establishment) mode.
+"subjects": [2]: The Node ID of the device being granted access (the switch).
+"targets": [{"cluster": 6, "endpoint": 1}]: The cluster and endpoint on the light bulb that the switch can access.
+1: The Node ID of the device where the ACL is being written (the light bulb).
+0: The endpoint ID of the Access Control cluster on the light bulb (usually endpoint 0).
+
 ## License
 
 This project is released under the [Creative Commons Zero (CC0 1.0 Universal)](https://creativecommons.org/publicdomain/zero/1.0/) license. You can copy, modify, distribute and perform the work, even for commercial purposes, all without asking permission.
