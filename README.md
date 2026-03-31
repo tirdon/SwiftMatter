@@ -132,7 +132,12 @@ After flashing, the device advertises over BLE for Matter commissioning. Use the
 
 ```bash
 # Using chip-tool
-chip-tool pairing ble-wifi <node-id> <ssid> <password> <setup-pin-code> <discriminator>
+chip-tool pairing code <node-id> <pairing-code>
+```
+
+```bash
+# Unpair
+chip-tool pairing unpair <node_id>
 ```
 
 Once commissioned, the device exposes an on/off plug-in endpoint plus any sensor endpoints you have enabled in software (DHT22 temp/humidity, DS18B20, moisture, etc.).
@@ -166,7 +171,7 @@ ACL entries grant permission for the switch (node 2) to send CASE-authenticated 
 - `subjects`: `[2]` is the Node ID of the switch.
 - `targets`: Specifies the cluster/endpoint that the switch may access (`cluster 6`, `endpoint 1`).
 - `1`: Node ID where the ACL is written (light bulb).
-- `0`: Endpoint ID of the Access Control cluster on the light bulb (usually endpoint 0).
+- `0`: Endpoint ID of the Access Control cluster on the light bulb (usually endpoint 0 write to root endpoint that has acl cluster, ep 1 doesn't work).
 
 ## Swift ↔ ESP-Matter Bridging
 

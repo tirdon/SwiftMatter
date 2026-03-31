@@ -36,7 +36,7 @@
 // #include <driver/rmt.h>
 #include <iot_button.h>
 
-#include <dht.h>
+// #include <dht.h>
 
 // ESP IDF
 // ==================================================

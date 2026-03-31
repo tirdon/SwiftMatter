@@ -21,20 +21,20 @@ func main() -> Never {
 		}
 	}
 
-	let humidityEndpoint = Matter.DHT22_humidityEndpoint(rootNode: rootNode)
-	let temperatureEndpoint = Matter.DHT22_tempEndpoint(rootNode: rootNode)
+	// let humidityEndpoint = Matter.DHT22_humidityEndpoint(rootNode: rootNode)
+	// let temperatureEndpoint = Matter.DHT22_tempEndpoint(rootNode: rootNode)
 
 	let button = Button(endpoint: switchEndpoint.id, led: led)
-	let dht = DHT22Sensor(
-		humidityEndpoint: humidityEndpoint.id, temperatureEndpoint: temperatureEndpoint.id)
+	// let dht = DHT22Sensor(
+	// humidityEndpoint: humidityEndpoint.id, temperatureEndpoint: temperatureEndpoint.id)
 
 	rootNode.addEndpoint(switchEndpoint)
-	rootNode.addEndpoint(humidityEndpoint)
-	rootNode.addEndpoint(temperatureEndpoint)
+	// rootNode.addEndpoint(humidityEndpoint)
+	// rootNode.addEndpoint(temperatureEndpoint)
 
-	xTaskCreate(
-		DHT22Sensor.dht_rx_task, "dht_rx_task", 4096, Unmanaged.passRetained(dht).toOpaque(), 3,
-		nil)
+	// xTaskCreate(
+	// 	DHT22Sensor.dht_rx_task, "dht_rx_task", 4096, Unmanaged.passRetained(dht).toOpaque(), 3,
+	// 	nil)
 
 	let ir = IRSensor(led: led)
 	xTaskCreate(

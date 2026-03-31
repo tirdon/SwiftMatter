@@ -56,7 +56,7 @@ final class Button {
         )
     }
 }
-
+/*
 //MARK: - DHT22
 final class DHT22Sensor {
     private let gpio = GPIO_NUM_4
@@ -133,6 +133,7 @@ final class DHT22Sensor {
         if err != ESP_OK { print("DHT22 update_humidity failed: \(err)") }
     }
 }
+*/
 
 //MARK: - IR
 
@@ -145,21 +146,21 @@ final class IRSensor {
     // NEC IR command codes
     private enum Command {
         static let powerOff: UInt8 = 0x01
-        static let powerOn:  UInt8 = 0x1a
+        static let powerOn: UInt8 = 0x1a
     }
 
     // NEC protocol timing thresholds (microseconds)
     private enum Timing {
-        static let leadLowMin:    Int64 = 8_500
-        static let leadLowMax:    Int64 = 9_500
+        static let leadLowMin: Int64 = 8_500
+        static let leadLowMax: Int64 = 9_500
         static let repeatHighMin: Int64 = 2_000
         static let repeatHighMax: Int64 = 2_800
-        static let frameHighMin:  Int64 = 4_000
-        static let frameHighMax:  Int64 = 5_000
-        static let bitLowMin:     Int64 = 400
-        static let bitLowMax:     Int64 = 800
+        static let frameHighMin: Int64 = 4_000
+        static let frameHighMax: Int64 = 5_000
+        static let bitLowMin: Int64 = 400
+        static let bitLowMax: Int64 = 800
         static let bitHighThreshold: Int64 = 1_200
-        static let pulseTimeout:  Int64 = 20_000
+        static let pulseTimeout: Int64 = 20_000
     }
 
     /// Repeat timeout in microseconds (200ms).
@@ -252,9 +253,9 @@ final class IRSensor {
     }
 
     private static func isValidNec(_ frame: UInt32) -> Bool {
-        let address    = UInt8( frame        & 0xFF)
-        let addressInv = UInt8((frame >>  8) & 0xFF)
-        let command    = UInt8((frame >> 16) & 0xFF)
+        let address = UInt8(frame & 0xFF)
+        let addressInv = UInt8((frame >> 8) & 0xFF)
+        let command = UInt8((frame >> 16) & 0xFF)
         let commandInv = UInt8((frame >> 24) & 0xFF)
 
         return (address ^ addressInv) == 0xFF && (command ^ commandInv) == 0xFF
@@ -322,23 +323,23 @@ final class IRSensor {
 final class DS18B20Sensor {
     // 1-Wire ROM commands
     private enum ROM {
-        static let skip: UInt8       = 0xCC
-        static let convertT: UInt8   = 0x44
+        static let skip: UInt8 = 0xCC
+        static let convertT: UInt8 = 0x44
         static let readScratch: UInt8 = 0xBE
     }
 
     // 1-Wire timing constants (microseconds)
     private enum Timing {
-        static let resetLow:       Int64 = 480
-        static let presenceWait:   Int64 = 70
-        static let presenceSlot:   Int64 = 410
-        static let writeBit1Low:   Int64 = 6
-        static let writeBit1High:  Int64 = 64
-        static let writeBit0Low:   Int64 = 60
-        static let writeBit0High:  Int64 = 10
-        static let readInitLow:    Int64 = 3
+        static let resetLow: Int64 = 480
+        static let presenceWait: Int64 = 70
+        static let presenceSlot: Int64 = 410
+        static let writeBit1Low: Int64 = 6
+        static let writeBit1High: Int64 = 64
+        static let writeBit0Low: Int64 = 60
+        static let writeBit0High: Int64 = 10
+        static let readInitLow: Int64 = 3
         static let readSampleWait: Int64 = 10
-        static let readSlotEnd:    Int64 = 53
+        static let readSlotEnd: Int64 = 53
     }
 
     /// Conversion wait in milliseconds (DS18B20 12-bit resolution).

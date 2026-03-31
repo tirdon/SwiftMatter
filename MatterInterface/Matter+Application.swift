@@ -30,6 +30,7 @@ extension Matter {
                     if result == chip.DeviceLayer.kConnectivity_Established {
                         led.enabled = false
                         print("WiFi connected")
+                        printFabricInfo()
                     } else if result == chip.DeviceLayer.kConnectivity_Lost {
                         led.enabled = true
                         print("WiFi disconnected")
