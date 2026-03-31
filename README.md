@@ -116,7 +116,7 @@ chip-tool binding write binding '[{"node" : 1 , "cluster" : 6 , "endpoint" : 1}]
 This grants the controlling device permission to send unicast commands to the controlled device.
 
 ```bash
-chip-tool accesscontrol write acl '[{"privilege": 3, "authMode": 2, "subjects": [2], "targets": [{"cluster": 6, "endpoint": 1}]}]' 1 0
+chip-tool accesscontrol write acl '[{"privilege": 3, "authMode": 2, "subjects": [2], "targets": [{"cluster": 6, "endpoint": 1, "deviceType": null}]}]' 1 0
 ```
 
 - `privilege`: `3` grants `Operate`.
