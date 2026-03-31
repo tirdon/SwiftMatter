@@ -128,17 +128,45 @@ Key settings in `sdkconfig.defaults`:
 
 ## Matter Commissioning
 
-After flashing, the device will start BLE advertising for Matter commissioning. Use the Apple Home app, Google Home app, or `chip-tool` to commission:
+After flashing, the device advertises over BLE for Matter commissioning. Use the Apple Home app, Google Home app, or `chip-tool` to commission:
 
 ```bash
 # Using chip-tool
 chip-tool pairing ble-wifi <node-id> <ssid> <password> <setup-pin-code> <discriminator>
 ```
 
-Once commissioned, the device exposes three endpoints:
-1. **On/Off Plug-in Unit** — toggle the irrigation relay
-2. **Temperature Sensor** — DHT22 temperature readings (range: −40°C to 125°C)
-3. **Humidity Sensor** — DHT22 relative humidity readings (range: 0% to 100%)
+Once commissioned, the device exposes an on/off plug-in endpoint plus any sensor endpoints you have enabled in software (DHT22 temp/humidity, DS18B20, moisture, etc.).
+
+### Manual Interaction Examples
+
+#### Write the Binding Entry on the Controlling Device (Switch, node 2)
+
+Binding tells the switch which fabric, node, and endpoint it should control. Run this from the controller that owns the switch (node 2):
+
+```bash
+./chip-tool binding write binding '[{"node" : 1 , "cluster" : 6 , "endpoint" : 1}]' 2 1
+```
+
+- `node`: Node ID of the target device (e.g., 1 for the light bulb).
+- `cluster`: Cluster ID to control (`6` is On/Off).
+- `endpoint`: Endpoint ID on the target device (typically `1`).
+- `2`: Node ID of the device writing the binding table (switch / node 2).
+- `1`: Endpoint ID on the switch performing the control action.
+
+#### Write the Access Control List on the Controlled Device (Light Bulb, node 1)
+
+ACL entries grant permission for the switch (node 2) to send CASE-authenticated commands to the light bulb (node 1). Run from the controller that owns the bulb:
+
+```bash
+./chip-tool accesscontrol write acl '[{"privilege": 3, "authMode": 2, "subjects": [2], "targets": [{"cluster": 6, "endpoint": 1}]}]' 1 0
+```
+
+- `privilege`: `3` grants the `Operate` privilege.
+- `authMode`: `2` selects CASE (certificate-authenticated session).
+- `subjects`: `[2]` is the Node ID of the switch.
+- `targets`: Specifies the cluster/endpoint that the switch may access (`cluster 6`, `endpoint 1`).
+- `1`: Node ID where the ACL is written (light bulb).
+- `0`: Endpoint ID of the Access Control cluster on the light bulb (usually endpoint 0).
 
 ## Swift ↔ ESP-Matter Bridging
 

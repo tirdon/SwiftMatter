@@ -6,6 +6,10 @@ extension Matter {
             esp_matter.endpoint.on_off_plug_in_unit.get_device_type_id()
         }
 
+        var accessControlCluster: AccessControl {
+            innerEndpoint.cluster(.accessControl)
+        }
+
         init(rootNode: Node) {
             var config = esp_matter.endpoint.on_off_plug_in_unit.config_t()
             config.on_off.on_off = false
@@ -16,6 +20,17 @@ extension Matter {
                 UInt8(esp_matter.ENDPOINT_FLAG_NONE.rawValue),
                 Unmanaged.passRetained(rootNode.innerNode.context).toOpaque()
             )
+
+            var accessControlConfig = esp_matter.cluster.access_control.config_t()
+            guard
+                esp_matter.cluster.access_control.create(
+                    endpoint,
+                    &accessControlConfig,
+                    UInt8(esp_matter.CLUSTER_FLAG_SERVER.rawValue)
+                ) != nil
+            else {
+                fatalError("Failed to add Access Control cluster to switch endpoint")
+            }
 
             super.init(rootNode: rootNode, endpoint: esp_matter.endpoint.get_id(endpoint))
         }

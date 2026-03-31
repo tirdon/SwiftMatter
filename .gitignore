@@ -10,3 +10,5 @@ sdkconfig.defaults
 *.old
 
 dependencies.lock
+
+.claude/**

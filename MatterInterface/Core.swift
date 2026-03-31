@@ -50,6 +50,13 @@ extension MatterConcreteCluster {
     func attribute<Attribute: MatterAttribute>(_ id: AttributeID<Attribute>) -> Attribute {
         Attribute(attribute: esp_matter.attribute.get_shim(cluster, id.rawValue))
     }
+
+    func attributeIfPresent<Attribute: MatterAttribute>(_ id: AttributeID<Attribute>) -> Attribute? {
+        guard let attribute = esp_matter.attribute.get_shim(cluster, id.rawValue) else {
+            return nil
+        }
+        return Attribute(attribute: attribute)
+    }
 }
 
 // MARK: - Attribute

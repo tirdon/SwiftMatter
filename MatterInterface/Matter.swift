@@ -32,6 +32,10 @@ extension Matter {
             self.innerNode = root
         }
 
+        var accessControlCluster: AccessControl {
+            innerNode.endpoint.cluster(.accessControl)
+        }
+
         func addEndpoint(_ endpoint: Endpoint) {
             endpoints.append(endpoint)
         }
@@ -69,6 +73,13 @@ extension Matter {
         init(rootNode: Matter.Node, endpoint id: UInt16) {
             self.id = id
             _ = Unmanaged.passRetained(self)
+        }
+
+        var innerEndpoint: __idf_main.Endpoint {
+            guard let endpoint = __idf_main.Endpoint(id: id) else {
+                fatalError("Failed to resolve endpoint \(id)")
+            }
+            return endpoint
         }
 
         enum Attribute {
