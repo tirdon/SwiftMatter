@@ -66,6 +66,13 @@ idf.py build
 idf.py -p /dev/tty.usbserial-* flash monitor
 ```
 
+Setting Wi-Fi credentials into [`sdkconfig.defaults`](./sdkconfig.defaults), add:
+
+```text
+CONFIG_DEFAULT_WIFI_SSID="<your wifi ssid>"
+CONFIG_DEFAULT_WIFI_PASSWORD="<your wifi password>"
+```
+
 ## Customize This Template
 
 1. Update the device name in `main/Main.swift`.
