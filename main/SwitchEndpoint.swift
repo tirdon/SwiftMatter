@@ -3,14 +3,14 @@
 extension Matter {
     class SwitchEndpoint: Endpoint {
         static var deviceTypeId: UInt32 {
-            esp_matter.endpoint.on_off_plug_in_unit.get_device_type_id()
+            esp_matter.endpoint.on_off_light_switch.get_device_type_id()
         }
 
         init(rootNode: Node) {
-            var config = esp_matter.endpoint.on_off_plug_in_unit.config_t()
-            config.on_off.on_off = false
+            var config = esp_matter.endpoint.on_off_light_switch.config_t()
+            config.binding = .init()
 
-            let endpoint = esp_matter.endpoint.on_off_plug_in_unit.create(
+            let endpoint = esp_matter.endpoint.on_off_light_switch.create(
                 rootNode.innerNode.node,
                 &config,
                 UInt8(esp_matter.ENDPOINT_FLAG_NONE.rawValue),
@@ -22,6 +22,7 @@ extension Matter {
     }
 }
 
+/*
 extension Matter {
     final class DHT22_tempEndpoint: Endpoint {
         static var deviceTypeId: UInt32 {
@@ -92,3 +93,4 @@ extension Matter {
         }
     }
 }
+*/

@@ -11,12 +11,15 @@
 
 #include "BridgingHeader.h"
 #include "esp_err.h"
-#include "esp_matter_attribute_utils.h"
+#include "esp_matter_client.h"
+#include "esp_matter_core.h"
 #include "portmacro.h"
-#include <inttypes.h>
+#include <app/clusters/bindings/binding-table.h>
+#include <cstdio>
+#include <esp_heap_caps.h>
 #include <esp_netif.h>
 #include <esp_system.h>
-#include <esp_heap_caps.h>
+#include <inttypes.h>
 
 esp_err_t esp_matter::attribute::set_callback_shim(callback_t_shim callback) {
   return set_callback((callback_t)callback);
@@ -51,6 +54,12 @@ void printStationIP() {
 }
 
 void printFabricInfo() {
+  if (!esp_matter::is_started()) {
+    printf("Fabric info unavailable: Matter not started yet\n");
+    return;
+  }
+
+  esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
   const auto &fabricTable = chip::Server::GetInstance().GetFabricTable();
   printf("Fabric count: %u\n", fabricTable.FabricCount());
   for (const auto &fabricInfo : fabricTable) {
@@ -64,6 +73,12 @@ void printFabricInfo() {
 }
 
 void recomissionFabric() {
+  if (!esp_matter::is_started()) {
+    printf("Cannot reopen commissioning window: Matter not started yet\n");
+    return;
+  }
+
+  esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
   if (chip::Server::GetInstance().GetFabricTable().FabricCount() == 0) {
     chip::CommissioningWindowManager &commissionMgr =
         chip::Server::GetInstance().GetCommissioningWindowManager();
@@ -111,20 +126,211 @@ void portYIELD_FROM_ISR_shim(int32_t xHigherPriorityTaskWoken) {
   }
 }
 
-
-void ulTaskNotifyGive_shim(TaskHandle_t xTaskToNotify) {
+void xTaskNotifyGive_shim(TaskHandle_t xTaskToNotify) {
   xTaskNotifyGive(xTaskToNotify);
 }
 
-void esp_restart_shim() {
-  esp_restart();
+esp_err_t esp_matter::client::cluster_update_shim(uint16_t endpoint_id,
+                                                  request_handle_t *req) {
+  if (!req) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  if (!esp_matter::is_started()) {
+    printf("[LIGHT] Ignoring cluster update before Matter startup\n");
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
+  return cluster_update(endpoint_id, req);
 }
 
-uint32_t get_free_heap_size_shim() {
-  return esp_get_free_heap_size();
+esp_err_t esp_matter::client::init_client_callbacks_shim() {
+  return set_request_callback(on_server_update, on_group_request, nullptr);
 }
 
-uint32_t get_min_free_heap_size_shim() {
-  return esp_get_minimum_free_heap_size();
+/*
+void subscribe_to_bound_devices_shim(uint16_t endpoint_id) {
+  if (!esp_matter::is_started()) {
+    printf("[TBR] Skipping subscriptions for endpoint %d before Matter start\n",
+           endpoint_id);
+    return;
+  }
+
+  esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
+  auto &bindingTable = chip::app::Clusters::Binding::Table::GetInstance();
+  for (const auto &entry : bindingTable) {
+    if (entry.local != endpoint_id) {
+      continue;
+    }
+    if (entry.type != chip::app::Clusters::Binding::MATTER_UNICAST_BINDING) {
+      continue;
+    }
+    if (!entry.clusterId.has_value() ||
+        entry.clusterId.value() != chip::app::Clusters::OnOff::Id) {
+      continue;
+    }
+
+    esp_matter::client::request_handle_t req_handle;
+    req_handle.type = esp_matter::client::SUBSCRIBE_ATTR;
+    req_handle.attribute_path = chip::app::AttributePathParams(
+        entry.remote, chip::app::Clusters::OnOff::Id,
+        chip::app::Clusters::OnOff::Attributes::OnOff::Id);
+
+    esp_matter::client::connect(
+        chip::Server::GetInstance().GetCASESessionManager(), entry.fabricIndex,
+        entry.nodeId, &req_handle);
+    printf("[TBR] Subscribing to 0x%" PRIx64 " (Endpoint %d)\n", entry.nodeId,
+           entry.remote);
+  }
 }
+
+void print_bindings_shim(uint16_t endpoint_id) {
+  if (!esp_matter::is_started()) {
+    printf("[TBR] Cannot print bindings before Matter start\n");
+    return;
+  }
+
+  esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
+  auto &bindingTable = chip::app::Clusters::Binding::Table::GetInstance();
+  printf("[TBR] Bindings for endpoint %d:\n", endpoint_id);
+  for (const auto &entry : bindingTable) {
+    if (entry.local == endpoint_id) {
+      if (entry.type == chip::app::Clusters::Binding::MATTER_UNICAST_BINDING) {
+        printf("  Unicast: NodeID: 0x%" PRIx64 ", Fabric: %d, Remote EP: %d\n",
+               entry.nodeId, entry.fabricIndex, entry.remote);
+      } else if (entry.type ==
+                 chip::app::Clusters::Binding::MATTER_MULTICAST_BINDING) {
+        printf("  Multicast: GroupID: 0x%04x, Fabric: %d\n", entry.groupId,
+               entry.fabricIndex);
+      }
+    }
+  }
+}
+*/
+
+} // extern "C"
+
+// =======================================================================
+// MARK: bind
+// =======================================================================
+namespace {
+constexpr uint16_t kMinSubscribeIntervalSeconds = 1;
+constexpr uint16_t kMaxSubscribeIntervalSeconds = 60;
+
+bool is_onoff_attribute_path(const chip::app::AttributePathParams &path) {
+  return path.mClusterId == chip::app::Clusters::OnOff::Id &&
+         path.mAttributeId == chip::app::Clusters::OnOff::Attributes::OnOff::Id;
+}
+
+bool is_onoff_command_path(const chip::app::CommandPathParams &path) {
+  return path.mClusterId == chip::app::Clusters::OnOff::Id;
+}
+
+void send_command_success_callback(void *context,
+                                   const chip::app::ConcreteCommandPath &path,
+                                   const chip::app::StatusIB &status,
+                                   chip::TLV::TLVReader *response_data) {
+  printf("[LIGHT] Command sent: cluster=0x%" PRIx32 ", command=0x%" PRIx32 "\n",
+         path.mClusterId, path.mCommandId);
+}
+
+void send_command_failure_callback(void *context, CHIP_ERROR error) {
+  printf("[LIGHT] Command send failed: %" CHIP_ERROR_FORMAT "\n",
+         error.Format());
+}
+} // namespace
+
+class OnOffReadCallback : public chip::app::ReadClient::Callback {
+public:
+  void OnAttributeData(const chip::app::ConcreteDataAttributePath &path,
+                       chip::TLV::TLVReader *data,
+                       const chip::app::StatusIB &status) override {
+    if (!data)
+      return;
+    if (path.mClusterId != chip::app::Clusters::OnOff::Id)
+      return;
+    if (path.mAttributeId != chip::app::Clusters::OnOff::Attributes::OnOff::Id)
+      return;
+
+    bool val = false;
+    if (data->Get(val) == CHIP_NO_ERROR) {
+      update_local_led_shim(val);
+    }
+  }
+
+  void OnError(CHIP_ERROR error) override {
+    printf("[LIGHT] OnOff subscription error\n");
+  }
+
+  void OnDone(chip::app::ReadClient *client) override {
+    printf("[LIGHT] OnOff subscription ended\n");
+  }
+
+  void OnSubscriptionEstablished(chip::SubscriptionId id) override {
+    printf("[LIGHT] OnOff subscription established (id=%u)\n", (unsigned)id);
+  }
+};
+
+static OnOffReadCallback sOnOffReadCallback;
+
+void on_server_update(esp_matter::client::peer_device_t *peer_device,
+                      esp_matter::client::request_handle_t *req_handle,
+                      void *priv_data) {
+  if (!peer_device || !req_handle) {
+    printf("[LIGHT] Invalid peer_device or req_handle\n");
+    return;
+  }
+
+  if (req_handle->type == esp_matter::client::INVOKE_CMD) {
+    if (!is_onoff_command_path(req_handle->command_path)) {
+      printf("[LIGHT] Invalid command path\n");
+      return;
+    }
+
+    esp_matter::client::interaction::invoke::send_request(
+        nullptr, peer_device, req_handle->command_path, "{}",
+        send_command_success_callback, send_command_failure_callback,
+        chip::NullOptional, chip::NullOptional);
+    return;
+  }
+
+  if (req_handle->type == esp_matter::client::READ_ATTR) {
+    if (!is_onoff_attribute_path(req_handle->attribute_path)) {
+      return;
+    }
+
+    esp_matter::client::interaction::read::send_request(
+        peer_device, &req_handle->attribute_path, 1, nullptr, 0,
+        sOnOffReadCallback);
+    return;
+  }
+
+  if (req_handle->type != esp_matter::client::SUBSCRIBE_ATTR) {
+    return;
+  }
+
+  if (!is_onoff_attribute_path(req_handle->attribute_path)) {
+    return;
+  }
+
+  esp_matter::client::interaction::subscribe::send_request(
+      peer_device, &req_handle->attribute_path, 1, nullptr, 0,
+      kMinSubscribeIntervalSeconds, kMaxSubscribeIntervalSeconds, true, true,
+      sOnOffReadCallback);
+}
+
+void on_group_request(uint8_t fabric_index,
+                      esp_matter::client::request_handle_t *req_handle,
+                      void *priv_data) {
+  if (req_handle->type != esp_matter::client::INVOKE_CMD) {
+    printf("[LIGHT] Invalid command path\n");
+    return;
+  }
+  if (!is_onoff_command_path(req_handle->command_path)) {
+    printf("[LIGHT] Invalid command path\n");
+    return;
+  }
+  esp_matter::client::interaction::invoke::send_group_request(
+      fabric_index, req_handle->command_path, "{}");
+  printf("[LIGHT] Group toggle sent\n");
 }

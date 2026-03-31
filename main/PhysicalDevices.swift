@@ -1,7 +1,7 @@
 // MARK: - Helpers
 
 /// Convert milliseconds to FreeRTOS ticks.
-func msToTicks(_ ms: UInt32) -> UInt32 {
+internal func msToTicks(_ ms: UInt32) -> UInt32 {
     ms * UInt32(configTICK_RATE_HZ) / 1000
 }
 
@@ -33,13 +33,11 @@ final class LED: GPIO {
 //MARK: - Button
 final class Button {
     private static let pin = GPIO_NUM_17
+    private static let pollIntervalMs: UInt32 = 10
+    private static let debounceMs: UInt32 = 30
 
     private let id: UInt16
-    private let led: LED
-
-    var buttonConfig = button_config_t()
-    var buttonGpioConfig = button_gpio_config_t()
-    var buttonHandle: button_handle_t? = nil
+    var led: LED
 
     init(endpoint id: UInt16, led: LED) {
         self.id = id
@@ -47,30 +45,82 @@ final class Button {
 
         gpio_reset_pin(Button.pin)
         gpio_set_direction(Button.pin, GPIO_MODE_INPUT)
+        gpio_set_pull_mode(Button.pin, GPIO_PULLUP_ONLY)
         gpio_set_intr_type(Button.pin, GPIO_INTR_DISABLE)
-
-        buttonConfig.long_press_time = 2000
-        buttonConfig.short_press_time = 10
-
-        buttonGpioConfig.active_level = 1
-        buttonGpioConfig.gpio_num = Int32(Button.pin.rawValue)
 
         _ = Unmanaged.passRetained(self)
     }
 
+    static let buttonTask: @convention(c) (UnsafeMutableRawPointer?) -> Void = { param in
+        guard let param else {
+            vTaskDelete(nil)
+            return
+        }
+
+        let button = Unmanaged<Button>.fromOpaque(param).takeUnretainedValue()
+        var lastLevel = gpio_get_level(Button.pin)
+
+        while true {
+            let level = gpio_get_level(Button.pin)
+            if level != lastLevel {
+                vTaskDelay(msToTicks(Button.debounceMs))
+                let settledLevel = gpio_get_level(Button.pin)
+                lastLevel = settledLevel
+
+                if settledLevel == 0 {
+                    button.handlePress()
+
+                    while gpio_get_level(Button.pin) == 0 {
+                        vTaskDelay(msToTicks(Button.pollIntervalMs))
+                    }
+                    lastLevel = 1
+                }
+            }
+
+            vTaskDelay(msToTicks(Button.pollIntervalMs))
+        }
+    }
+
+    func start() {
+        xTaskCreate(
+            Button.buttonTask,
+            "button_task",
+            4096,
+            Unmanaged.passUnretained(self).toOpaque(),
+            4,
+            nil
+        )
+    }
+
+    private func handlePress() {
+        send_to_bound(with: chip.app.Clusters.OnOff.Commands.Toggle.Id)
+        print("button is pressed: Toggle sent to bound devices.")
+    }
+
+    /*
     func update() {
         var att_dataType: esp_matter_attr_val_t = esp_matter_bool(!led.enabled)
 
-        _ = esp_matter.attribute.update_shim(
+        esp_matter.attribute.update_shim(
             UInt16(self.id),
             UInt32(chip.app.Clusters.OnOff.Id),
             UInt32(chip.app.Clusters.OnOff.Attributes.OnOff.Id),
             &att_dataType
         )
+    }*/
+
+    func send_to_bound(with commandID: chip.CommandId) {
+        var req = esp_matter.client.request_handle_t()
+        req.type = esp_matter.client.INVOKE_CMD
+
+        req.command_path.mClusterId = chip.app.Clusters.OnOff.Id
+        req.command_path.mCommandId = commandID
+        esp_matter.client.cluster_update_shim(self.id, &req)
     }
 }
 
 //MARK: - DHT22
+/*
 final class DHT22Sensor {
     private let gpio = GPIO_NUM_4
     private var temperature: Float = 0.0
@@ -146,9 +196,11 @@ final class DHT22Sensor {
         if err != ESP_OK { print("DHT22 update_humidity failed: \(err)") }
     }
 }
+*/
 
 //MARK: - IR
 
+/*
 final class IRSensor {
     enum NecResult {
         case frame(UInt32)
@@ -710,3 +762,4 @@ final class IRTransmitter {
         }
     }
 }
+*/
