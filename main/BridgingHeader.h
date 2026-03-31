@@ -33,10 +33,6 @@
 #include <driver/rmt_tx.h>
 #include <nvs_flash.h>
 #include <sdkconfig.h>
-// #include <driver/rmt.h>
-#include <iot_button.h>
-
-// #include <dht.h>
 
 // ESP IDF
 // ==================================================

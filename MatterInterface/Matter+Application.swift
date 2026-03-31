@@ -6,9 +6,7 @@ extension Matter {
         var rootNode: Matter.Node? = nil
         let led = Matter.OnBoardLED()
 
-        init() {
-            _ = Unmanaged.passRetained(self)
-        }
+        init() { _ = Unmanaged.passRetained(self) }
 
         func start() {
             func callback(
@@ -34,6 +32,7 @@ extension Matter {
                     } else if result == chip.DeviceLayer.kConnectivity_Lost {
                         led.enabled = true
                         print("WiFi disconnected")
+                        gpio_set_level(LED.pin, 0)
                     }
 
                 default:

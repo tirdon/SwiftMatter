@@ -11,7 +11,7 @@ An ESP32-C3/C6 irrigation controller built entirely in **Embedded Swift**, using
 - **Capacitive Soil Moisture Endpoint** — reports soil moisture percentage via ADC
 - **Physical Button** — GPIO 21 button toggles the switch state and reports back to the Matter fabric
 - **Onboard LED** — GPIO 8 status LED indicates Wi-Fi connectivity
-- **IR Receiver (NEC)** — TSOP38238 on GPIO 0, full NEC protocol decode with hold/repeat support, low-power ISR + `ulTaskNotifyTake` pattern
+- **IR Receiver (NEC)** — TSOP38238 on GPIO 0, full NEC protocol decode with hold/repeat support, controls the switch via Matter attribute updates, low-power ISR + `ulTaskNotifyTake` pattern
 
 ## Hardware
 
@@ -19,7 +19,7 @@ An ESP32-C3/C6 irrigation controller built entirely in **Embedded Swift**, using
 |-----------|------|-------|
 | LED / Relay | 9 | Active high |
 | Onboard Status LED | 8 | Active low (on = Wi-Fi disconnected) |
-| Push Button | 21 | Active high, 10 ms debounce, 2 s long press |
+| Push Button | 21 | Active high, 50 ms debounce |
 | DHT22 (AM2301) | 4 | Open-drain, ambient temperature + humidity |
 | DS18B20 | *Configurable* | Open-drain, waterproof temperature probe, 1-Wire |
 | Capacitive Soil Moisture | *ADC Channel* | Analog (mapped from 0-4095 to 100%-0%) |
@@ -69,7 +69,11 @@ Irrigation/
 │       │            │        polls every    polls every     polls every    notify_take  │
 │       │            │            10s            10s             10s      (blocks till)  │
 │       │            │             │              │               │       (falling edge) │
-│  ┌────▼────────────▼─────────────▼──────────────▼───────────────▼─────────────▼─────┐  │
+│       │            │             │              │               │          │           │
+│       │            │             │              │               │     uses Button's    │
+│       │            │             │              │               │     endpoint ID to   │
+│       │            │             │              │               │     update OnOff     │
+│  ┌────▼────────────▼─────────────▼──────────────▼───────────────▼──────────▼────────┐  │
 │  │                                 Matter.Node                                      │  │
 │  │  ┌─────────────┬───────────┬──────────────┬─────────────────┬─────────────────┐  │  │
 │  │  │ SwitchEndpt │ TempEndpt │  HumidEndpt  │ DS18B20_TempEpt │ Moist_HumidEpt  │  │  │
@@ -79,7 +83,8 @@ Irrigation/
 │                                          │                                             │
 │  ┌───────────────────────────────────────▼──────────────────────────────────────────┐  │
 │  │                              Matter.Application                                  │  │
-│  │                     esp_matter.start() → Wi-Fi → Fabric                          │  │
+│  │              esp_matter.start() → Wi-Fi → Fabric (starts first)                  │  │
+│  │                  FreeRTOS tasks created after Matter is ready                    │  │
 │  └──────────────────────────────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -142,37 +147,6 @@ chip-tool pairing unpair <node_id>
 
 Once commissioned, the device exposes an on/off plug-in endpoint plus any sensor endpoints you have enabled in software (DHT22 temp/humidity, DS18B20, moisture, etc.).
 
-### Manual Interaction Examples
-
-#### Write the Binding Entry on the Controlling Device (Switch, node 2)
-
-Binding tells the switch which fabric, node, and endpoint it should control. Run this from the controller that owns the switch (node 2):
-
-```bash
-./chip-tool binding write binding '[{"node" : 1 , "cluster" : 6 , "endpoint" : 1}]' 2 1
-```
-
-- `node`: Node ID of the target device (e.g., 1 for the light bulb).
-- `cluster`: Cluster ID to control (`6` is On/Off).
-- `endpoint`: Endpoint ID on the target device (typically `1`).
-- `2`: Node ID of the device writing the binding table (switch / node 2).
-- `1`: Endpoint ID on the switch performing the control action.
-
-#### Write the Access Control List on the Controlled Device (Light Bulb, node 1)
-
-ACL entries grant permission for the switch (node 2) to send CASE-authenticated commands to the light bulb (node 1). Run from the controller that owns the bulb:
-
-```bash
-./chip-tool accesscontrol write acl '[{"privilege": 3, "authMode": 2, "subjects": [2], "targets": [{"cluster": 6, "endpoint": 1}]}]' 1 0
-```
-
-- `privilege`: `3` grants the `Operate` privilege.
-- `authMode`: `2` selects CASE (certificate-authenticated session).
-- `subjects`: `[2]` is the Node ID of the switch.
-- `targets`: Specifies the cluster/endpoint that the switch may access (`cluster 6`, `endpoint 1`).
-- `1`: Node ID where the ACL is written (light bulb).
-- `0`: Endpoint ID of the Access Control cluster on the light bulb (usually endpoint 0 write to root endpoint that has acl cluster, ep 1 doesn't work).
-
 ## Swift ↔ ESP-Matter Bridging
 
 The C++ ESP-Matter SDK doesn't import cleanly into Swift due to type mismatches (`uint32_t` → `UInt` vs `CUnsignedLong`). The `MatterInterface/` directory provides thin C++ shims that normalize the API:
@@ -205,8 +179,8 @@ Remote button press:
     → ISR disables interrupt, sends task notification
       → ir_rx_task wakes from ulTaskNotifyTake_shim()
         → Bit-bang NEC decode (readPulse timing)
-          → handleCommand() dispatches action
-            → 50ms debounce → re-enable interrupt → sleep again
+          → handleCommand() → update_button() via Matter attribute update
+            → 1s debounce → re-enable interrupt → sleep again
 ```
 
 ### NEC Frame Format
@@ -229,4 +203,4 @@ The IR task uses a **GPIO ISR + `ulTaskNotifyTake`** pattern instead of busy-pol
 
 ## License
 
-This project is released under the [Creative Commons Zero (CC0 1.0 Universal)](https://creativecommons.org/publicdomain/zero/1.0/) license. You can copy, modify, distribute and perform the work, even for commercial purposes, all without asking permission.
+This project is released under the [License](https://github.com/tirdon/SwiftMatter/blob/main/LICENSE). You can copy, modify, distribute and perform the work, even for commercial purposes, all without asking permission.

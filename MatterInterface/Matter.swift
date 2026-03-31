@@ -32,10 +32,6 @@ extension Matter {
             self.innerNode = root
         }
 
-        var accessControlCluster: AccessControl {
-            innerNode.endpoint.cluster(.accessControl)
-        }
-
         func addEndpoint(_ endpoint: Endpoint) {
             endpoints.append(endpoint)
         }
@@ -84,7 +80,6 @@ extension Matter {
 
         enum Attribute {
             case onOff
-            case dht22update
             case unknown(UInt32)
 
             init?(cluster: Cluster, attribute aid: UInt32) {
