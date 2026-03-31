@@ -3,67 +3,25 @@
 extension Matter {
     class SwitchEndpoint: Endpoint {
         static var deviceTypeId: UInt32 {
-            esp_matter.endpoint.on_off_plug_in_unit.get_device_type_id()
+            esp_matter.endpoint.power_source.get_device_type_id()
         }
 
         init(rootNode: Node) {
-            var config = esp_matter.endpoint.on_off_plug_in_unit.config_t()
-            config.on_off.on_off = false
+            // Use the built-in Power Source device type as the switch template here.
+            var config = esp_matter.endpoint.power_source.config_t()
 
-            let endpoint = esp_matter.endpoint.on_off_plug_in_unit.create(
+            // Create the endpoint on the root node with the shared Matter context.
+            let endpoint = esp_matter.endpoint.power_source.create(
                 rootNode.innerNode.node,
                 &config,
                 UInt8(esp_matter.ENDPOINT_FLAG_NONE.rawValue),
                 Unmanaged.passRetained(rootNode.innerNode.context).toOpaque()
             )
 
+            // Store the endpoint id so higher-level Swift code can route events to it.
             super.init(rootNode: rootNode, endpoint: esp_matter.endpoint.get_id(endpoint))
         }
     }
 }
 
-extension Matter {
-    final class DHT22_tempEndpoint: Endpoint {
-        static var deviceTypeId: UInt32 {
-            esp_matter.endpoint.temperature_sensor.get_device_type_id()
-        }
-
-        init(rootNode: Node) {
-            var t_config = esp_matter.endpoint.temperature_sensor.config_t()
-            t_config.temperature_measurement.max_measured_value = .init(125_00)
-            t_config.temperature_measurement.min_measured_value = .init(-40_00)
-            t_config.temperature_measurement.measured_value = .init(101_00)
-
-            let endpoint = esp_matter.endpoint.temperature_sensor.create(
-                rootNode.innerNode.node,
-                &t_config,
-                UInt8(esp_matter.ENDPOINT_FLAG_NONE.rawValue),
-                Unmanaged.passRetained(rootNode.innerNode.context).toOpaque()
-            )
-
-            super.init(rootNode: rootNode, endpoint: esp_matter.endpoint.get_id(endpoint))
-        }
-    }
-}
-
-extension Matter {
-    final class DHT22_humidityEndpoint: Endpoint {
-        static var deviceTypeId: UInt32 { esp_matter.endpoint.humidity_sensor.get_device_type_id() }
-
-        init(rootNode: Node) {
-            var h_config = esp_matter.endpoint.humidity_sensor.config_t()
-            h_config.relative_humidity_measurement.max_measured_value = .init(100_00)
-            h_config.relative_humidity_measurement.min_measured_value = .init(0)
-            h_config.relative_humidity_measurement.measured_value = .init(0)
-
-            let endpoint = esp_matter.endpoint.humidity_sensor.create(
-                rootNode.innerNode.node,
-                &h_config,
-                UInt8(esp_matter.ENDPOINT_FLAG_NONE.rawValue),
-                Unmanaged.passRetained(rootNode.innerNode.context).toOpaque()
-            )
-
-            super.init(rootNode: rootNode, endpoint: esp_matter.endpoint.get_id(endpoint))
-        }
-    }
-}
+// Template endpoint for a simple Matter-controlled switch or relay.

@@ -1,199 +1,130 @@
-# SwiftMatter — Irrigation Controller
+# SwiftMatter Template
 
-An ESP32-C3/C6 irrigation controller built entirely in **Embedded Swift**, using the [Matter](https://csa-iot.org/all-solutions/matter/) smart home protocol through the ESP-Matter SDK by Espressif. The device exposes an on/off switch (for valve/relay control), a DHT22 temperature/humidity sensor, a DS18B20 waterproof temperature sensor, and a capacitive soil moisture sensor — all as standard Matter endpoints controllable from Apple Home, Google Home, or any Matter-compatible app.
+This branch is a template for building an ESP32-C3/C6 Matter device in Embedded Swift with ESP-Matter. It starts from a working on/off accessory and shows where to add LEDs, buttons, sensors, and other Matter endpoints.
 
-## Features
+## What This Template Includes
 
-- **Matter over Wi-Fi** — commission and control the device from any Matter fabric (Apple Home, Google Home, etc.)
-- **On/Off Switch Endpoint** — toggles external LED / relay on GPIO 9
-- **DHT22 Endpoints** — reports temperature and relative humidity via standard Matter clusters
-- **DS18B20 Endpoint** — reports water/soil temperature using the 1-Wire protocol
-- **Capacitive Soil Moisture Endpoint** — reports soil moisture percentage via ADC
-- **Physical Button** — GPIO 21 button toggles the switch state and reports back to the Matter fabric
-- **Onboard LED** — GPIO 8 status LED indicates Wi-Fi connectivity
-- **IR Receiver (NEC)** — TSOP38238 on GPIO 0, full NEC protocol decode with hold/repeat support, low-power ISR + `ulTaskNotifyTake` pattern
+- Embedded Swift app entry point wired into ESP-IDF
+- Matter root node, endpoint, and attribute bridging in Swift
+- Button and LED device helpers
+- Example commissioning, binding, and ACL commands for multi-device setups
 
-## Hardware
-
-| Component | GPIO | Notes |
-|-----------|------|-------|
-| LED / Relay | 9 | Active high |
-| Onboard Status LED | 8 | Active low (on = Wi-Fi disconnected) |
-| Push Button | 21 | Active high, 10 ms debounce, 2 s long press |
-| DHT22 (AM2301) | 4 | Open-drain, ambient temperature + humidity |
-| DS18B20 | *Configurable* | Open-drain, waterproof temperature probe, 1-Wire |
-| Capacitive Soil Moisture | *ADC Channel* | Analog (mapped from 0-4095 to 100%-0%) |
-| IR Receiver (TSOP38238) | 0 | Input with pull-up, NEC protocol, ISR on falling edge |
-
-## Project Structure
+## Repository Layout
 
 ```
 Irrigation/
-├── CMakeLists.txt              # Top-level ESP-IDF / ESP-Matter project config
-├── partitions.csv              # Custom partition table (OTA, NVS, coredump)
-├── sdkconfig.defaults          # SDK configuration defaults
-│
+├── CMakeLists.txt              # Top-level ESP-IDF and ESP-Matter build config
+├── partitions.csv              # Flash layout for app, OTA, NVS, and coredump
+├── sdkconfig.defaults          # Default Matter configuration
 ├── main/
-│   ├── CMakeLists.txt          # Component build — Swift compiler flags & source list
-│   ├── BridgingHeader.h        # C/C++ → Swift bridging (FreeRTOS, GPIO, Matter, DHT, RMT)
-│   ├── idf_component.yml       # ESP Component Registry dependencies (dht, cmake_utilities)
-│   ├── linker.lf               # Linker fragment
-│   ├── Main.swift              # app_main entry point — wires up endpoints, tasks, button
-│   ├── PhysicalDevices.swift   # LED, Button, DHT22, DS18B20, Soil Moisture, IR drivers
-│   └── SwitchEndpoint.swift    # Matter endpoint definitions (switch, temp, humidity)
-│
+│   ├── CMakeLists.txt          # Swift source list and compiler flags for the app
+│   ├── BridgingHeader.h        # C/C++ headers imported into Swift
+│   ├── linker.lf               # Linker script for the app
+│   ├── Main.swift              # app_main entry point and boot sequence
+│   ├── PhysicalDevices.swift   # Board-specific GPIO, sensors, and helper logic
+│   └── SwitchEndpoint.swift    # Matter endpoint template for the switch device
 └── MatterInterface/
-    ├── MatterInterface.h       # C++ shim declarations for esp_matter APIs
-    ├── MatterInterface.cpp     # C++ shim implementations (callback, attribute, report)
-    ├── Core.swift              # Protocol hierarchy (MatterNode/Endpoint/Cluster/Attribute)
-    ├── Core+ID.swift           # Typed ClusterID / AttributeID wrappers, concrete clusters
-    ├── Core+RootNode.swift     # Data model concrete structs (RootNode, Endpoint, etc.)
-    ├── Matter.swift            # Matter.Node event routing, Matter.Endpoint attributes
-    ├── Matter+Application.swift # Matter.Application — start, Wi-Fi event handling
-    └── Matter+OnBoardLED.swift  # Onboard status LED (GPIO 8)
+    ├── Core.swift              # Core Matter abstractions for nodes, endpoints, clusters
+    ├── Core+ID.swift           # Typed cluster and attribute IDs
+    ├── Core+RootNode.swift     # Concrete Swift wrappers for the Matter data model
+    ├── Matter.swift            # High-level application-facing Matter types
+    ├── Matter+Application.swift # Matter startup and device event handling
+    ├── Matter+OnBoardLED.swift # Status LED helper tied to Wi-Fi state
+    ├── MatterInterface.cpp     # C++ shims that normalize ESP-Matter APIs for Swift
+    └── MatterInterface.h       # C++ declarations consumed by the Swift bridge
 ```
 
-## Architecture
+## Hardware Defaults
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                                       Main.swift                                       │
-│                                   app_main() → Never                                   │
-│                                                                                        │
-│  ┌─────────┐  ┌─────────┐  ┌───────────┐  ┌───────────┐  ┌────────────┐  ┌─────────┐   │
-│  │   LED   │  │ Button  │  │   DHT22   │  │  DS18B20  │  │ Soil Moist │  │   IR    │   │
-│  │ GPIO 9  │  │ GPIO 21 │  │  GPIO 4   │  │  1-Wire   │  │    ADC     │  │ GPIO 0  │   │
-│  └────┬────┘  └────┬────┘  └─────┬─────┘  └─────┬─────┘  └──────┬─────┘  └────┬────┘   │
-│       │            │             │              │               │             │        │
-│       │            │        FreeRTOS task  FreeRTOS task   FreeRTOS task   GPIO ISR +  │
-│       │            │        polls every    polls every     polls every    notify_take  │
-│       │            │            10s            10s             10s      (blocks till)  │
-│       │            │             │              │               │       (falling edge) │
-│  ┌────▼────────────▼─────────────▼──────────────▼───────────────▼─────────────▼─────┐  │
-│  │                                 Matter.Node                                      │  │
-│  │  ┌─────────────┬───────────┬──────────────┬─────────────────┬─────────────────┐  │  │
-│  │  │ SwitchEndpt │ TempEndpt │  HumidEndpt  │ DS18B20_TempEpt │ Moist_HumidEpt  │  │  │
-│  │  │  (OnOff)    │  (DHT22)  │    (DHT22)   │    (DS18B20)    │       (ADC)     │  │  │
-│  │  └─────────────┴───────────┴──────────────┴─────────────────┴─────────────────┘  │  │
-│  └───────────────────────────────────────┬──────────────────────────────────────────┘  │
-│                                          │                                             │
-│  ┌───────────────────────────────────────▼──────────────────────────────────────────┐  │
-│  │                              Matter.Application                                  │  │
-│  │                     esp_matter.start() → Wi-Fi → Fabric                          │  │
-│  └──────────────────────────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────────────────────────┘
-```
+These are the defaults used in this branch. Change them to match your board:
+
+| Component | GPIO | Notes |
+|-----------|------|-------|
+| Relay / External LED | 9 | Active high |
+| Onboard Status LED | 8 | Active low |
+| Push Button | 21 | Active high |
 
 ## Prerequisites
 
-- **ESP-IDF** v5.3+
-- **ESP-Matter** SDK (set `ESP_MATTER_PATH` environment variable)
-- **Swift toolchain** with Embedded Swift support (nightly or 6.0+)
-- CMake 3.29+
+- ESP-IDF v5.4.1 or newer
+- ESP-Matter v1.5 SDK
+- Swift toolchain 6.0 or newer with Embedded Swift support
+- CMake 3.29 or newer
 
-## Building & Flashing
+## Build And Flash
 
 ```bash
-# Set required environment variables
-export TOOLCHAINS=org.swift.<62202602061a swift toolchain in .plist>
-export IDF_PATH=<path to esp>/esp-idf
-export ESP_MATTER_PATH=<path to esp>/esp-matter
+export TOOLCHAINS=org.swift.<toolchain-id>
+export IDF_PATH=<path to esp-idf>
+export ESP_MATTER_PATH=<path to esp-matter>
 
-# Source ESP-IDF
-. $IDF_PATH/export.sh
-. $ESP_MATTER_PATH/export.sh
+source $IDF_PATH/export.sh
+source $ESP_MATTER_PATH/export.sh
 
-# Set target (esp32c3 or esp32c6)
 idf.py set-target esp32c3
-
-# Build
 idf.py build
-
-# Flash & monitor
 idf.py -p /dev/tty.usbserial-* flash monitor
 ```
 
-## Configuration
+## Customize This Template
 
-Key settings in `sdkconfig.defaults`:
+1. Update the device name in `main/Main.swift`.
+2. Adjust GPIOs in `main/PhysicalDevices.swift`.
+3. Add or remove endpoints in `main/SwitchEndpoint.swift`.
+4. Extend the Matter model in `MatterInterface/` if you need new clusters or attributes.
+5. Tune `sdkconfig.defaults` and `partitions.csv` for your board and OTA strategy.
 
-| Setting | Value | Description |
-|---------|-------|-------------|
-| `CONFIG_IDF_TARGET` | `esp32c3` | Target chip (override with `set-target`) |
-| `CONFIG_DEFAULT_WIFI_SSID` | — | Wi-Fi network name |
-| `CONFIG_DEFAULT_WIFI_PASSWORD` | — | Wi-Fi password |
-| `CONFIG_ENABLE_CHIP_SHELL` | `y` | Matter CLI shell for debugging |
-| `CONFIG_ENABLE_OTA_REQUESTOR` | `y` | OTA firmware updates |
-| `CONFIG_USE_BLE_ONLY_FOR_COMMISSIONING` | `y` | BLE used only during Matter commissioning |
+## Commissioning
 
-## Matter Commissioning
-
-After flashing, the device will start BLE advertising for Matter commissioning. Use the Apple Home app, Google Home app, or `chip-tool` to commission:
+After flashing, the device advertises over BLE for Matter commissioning.
 
 ```bash
-# Using chip-tool
 chip-tool pairing ble-wifi <node-id> <ssid> <password> <setup-pin-code> <discriminator>
 ```
 
-Once commissioned, the device exposes three endpoints:
-1. **On/Off Plug-in Unit** — toggle the irrigation relay
-2. **Temperature Sensor** — DHT22 temperature readings (range: −40°C to 125°C)
-3. **Humidity Sensor** — DHT22 relative humidity readings (range: 0% to 100%)
-
-## Swift ↔ ESP-Matter Bridging
-
-The C++ ESP-Matter SDK doesn't import cleanly into Swift due to type mismatches (`uint32_t` → `UInt` vs `CUnsignedLong`). The `MatterInterface/` directory provides thin C++ shims that normalize the API:
-
-- `set_callback_shim` — wraps the attribute callback with Swift-compatible types
-- `get_shim` — cluster/attribute lookup with `unsigned int` parameters
-- `update_shim` — attribute value updates
-- `report_shim` — attribute reporting to the Matter fabric (for sensor value pushes)
-- `get_val_shim` — attribute value retrieval by endpoint/cluster/attribute ID
-
-### FreeRTOS Shims
-
-FreeRTOS task notification APIs (`ulTaskNotifyTake`, `vTaskNotifyGiveFromISR`, `portYIELD_FROM_ISR`) are C macros that Swift cannot import. The following `extern "C"` wrapper functions are provided:
-
-| Swift Function | Wraps |
-|---|---|
-| `ulTaskNotifyTake_shim(clearOnExit, ticks)` | `ulTaskNotifyTake` — blocks task until notified or timeout |
-| `vTaskNotifyGiveFromISR_shim(handle, &woken)` | `vTaskNotifyGiveFromISR` — sends notification from ISR context |
-| `portYIELD_FROM_ISR_shim(woken)` | `portYIELD_FROM_ISR` — triggers context switch if higher-priority task was woken |
-
-## IR Receiver (NEC Protocol)
-
-The IR subsystem uses a **TSOP38238** module on GPIO 0 to decode standard NEC infrared remote signals.
-
-### How it works
-
-```
-Remote button press:
-  TSOP38238 pulls GPIO 0 LOW → GPIO ISR fires (falling edge)
-    → ISR disables interrupt, sends task notification
-      → ir_rx_task wakes from ulTaskNotifyTake_shim()
-        → Bit-bang NEC decode (readPulse timing)
-          → handleCommand() dispatches action
-            → 50ms debounce → re-enable interrupt → sleep again
+```bash
+chip-tool pairing code <node-id> <setup-code>
 ```
 
-### NEC Frame Format
+## Example Multi-Device Setup
 
-| Field | Bits | Duration |
-|-------|------|----------|
-| AGC Leader | — | 9ms LOW + 4.5ms HIGH |
-| Address | 8 | LSB first |
-| Address (inverted) | 8 | Error check |
-| Command | 8 | LSB first |
-| Command (inverted) | 8 | Error check |
-| **Repeat code** | — | 9ms LOW + 2.25ms HIGH (button held) |
+Use this when one device acts as the controller and another device acts as the controlled accessory.
 
-### Low-Power Design
+### Write the Binding Entry on the Controlling Device
 
-The IR task uses a **GPIO ISR + `ulTaskNotifyTake`** pattern instead of busy-polling:
-- **Idle**: task is blocked (zero CPU usage), other tasks (Matter, DHT22) run normally
-- **Signal**: hardware interrupt wakes the task instantly on falling edge
-- **Timeout**: after 300ms of no activity, stale repeat state is cleared
+This tells the switch which device and endpoint to control.
+
+```bash
+chip-tool binding write binding '[{"node" : 1 , "cluster" : 6 , "endpoint" : 1}]' 2 1
+```
+
+- `node`: Target Node ID, for example `1` for the light bulb.
+- `cluster`: Cluster ID to control, for example `6` for On/Off.
+- `endpoint`: Target endpoint on the controlled device, usually `1`.
+- `2`: Node ID of the controlling device, for example the switch.
+- `1`: Endpoint ID on the controlling device.
+
+### Write the Access Control List on the Controlled Device
+
+This grants the controlling device permission to send unicast commands to the controlled device.
+
+```bash
+chip-tool accesscontrol write acl '[{"privilege": 3, "authMode": 2, "subjects": [2], "targets": [{"cluster": 6, "endpoint": 1}]}]' 1 0
+```
+
+- `privilege`: `3` grants `Operate`.
+- `authMode`: `2` selects CASE.
+- `subjects`: `[2]` is the controlling device Node ID.
+- `targets`: The cluster and endpoint the controller may access.
+- `1`: Node ID of the controlled device.
+- `0`: Endpoint ID of the Access Control cluster, usually endpoint 0 root_node.
+
+## Notes
+
+- The root node already includes Access Control through ESP-Matter.
+- `MatterInterface/` exists to smooth over Swift and ESP-Matter type mismatches.
+- Optional sensor blocks in `PhysicalDevices.swift` can be enabled as needed for your hardware.
 
 ## License
 
-This project is released under the [Creative Commons Zero (CC0 1.0 Universal)](https://creativecommons.org/publicdomain/zero/1.0/) license. You can copy, modify, distribute and perform the work, even for commercial purposes, all without asking permission.
+This project is released under the Unlicense. See [`LICENSE`](./LICENSE) for the full text.

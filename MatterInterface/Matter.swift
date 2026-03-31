@@ -22,11 +22,13 @@ extension Matter {
 
             _ = Unmanaged.passRetained(self)
 
-            guard let root = RootNode(
-                name: name,
-                attribute: self.eventHandler,
-                identify: { _, _, _, _ in self.identifyHandler?() }
-            ) else {
+            guard
+                let root = RootNode(
+                    name: name,
+                    attribute: self.eventHandler,
+                    identify: { _, _, _, _ in self.identifyHandler?() }
+                )
+            else {
                 fatalError("Failed to setup root node.")
             }
             self.innerNode = root
@@ -72,19 +74,10 @@ extension Matter {
         }
 
         enum Attribute {
-            case onOff
-            case dht22update
             case unknown(UInt32)
 
             init?(cluster: Cluster, attribute aid: UInt32) {
-                if cluster.as(OnOffControl.self) != nil {
-                    switch aid {
-                    case OnOffControl.onOff.rawValue: self = .onOff
-                    default: self = .unknown(aid)
-                    }
-                } else {
-                    self = .unknown(aid)
-                }
+                self = .unknown(aid)
             }
         }
 

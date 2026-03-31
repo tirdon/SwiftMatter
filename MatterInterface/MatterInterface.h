@@ -74,3 +74,5 @@ void portYIELD_FROM_ISR_shim(int32_t xHigherPriorityTaskWoken);
 #ifdef __cplusplus
 }
 #endif
+
+void printFabricInfo();

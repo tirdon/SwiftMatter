@@ -86,3 +86,22 @@ void portYIELD_FROM_ISR_shim(int32_t xHigherPriorityTaskWoken) {
   }
 }
 }
+
+void printFabricInfo() {
+  if (!esp_matter::is_started()) {
+    printf("Fabric info unavailable: Matter not started yet\n");
+    return;
+  }
+
+  esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
+  const auto &fabricTable = chip::Server::GetInstance().GetFabricTable();
+  printf("Fabric count: %u\n", fabricTable.FabricCount());
+  for (const auto &fabricInfo : fabricTable) {
+    printf("  Fabric index: %u\n", fabricInfo.GetFabricIndex());
+    printf("    Fabric ID: 0x%" PRIx64 "\n", fabricInfo.GetFabricId());
+    printf("    Compressed Fabric ID: 0x%" PRIx64 "\n",
+           fabricInfo.GetCompressedFabricId());
+    printf("    Node ID: 0x%" PRIx64 "\n", fabricInfo.GetNodeId());
+    printf("    Vendor ID: 0x%04x\n", fabricInfo.GetVendorId());
+  }
+}
