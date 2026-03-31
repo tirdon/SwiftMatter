@@ -91,8 +91,8 @@ Irrigation/
 
 ## Prerequisites
 
-- **ESP-IDF** v5.3+
-- **ESP-Matter** SDK (set `ESP_MATTER_PATH` environment variable)
+- **ESP-IDF** v5.4+
+- **ESP-Matter** v1.5 SDK (set `ESP_MATTER_PATH` environment variable)
 - **Swift toolchain** with Embedded Swift support (nightly or 6.0+)
 - CMake 3.29+
 
@@ -100,7 +100,7 @@ Irrigation/
 
 ```bash
 # Set required environment variables
-export TOOLCHAINS=org.swift.<62202602061a swift toolchain in .plist>
+export TOOLCHAINS=org.swift.<swift toolchain in .plist>
 export IDF_PATH=<path to esp>/esp-idf
 export ESP_MATTER_PATH=<path to esp>/esp-matter
 
