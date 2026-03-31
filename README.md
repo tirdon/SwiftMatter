@@ -53,6 +53,13 @@ These are the defaults used in this branch. Change them to match your board:
 
 ## Build And Flash
 
+Setting Wi-Fi credentials into [`sdkconfig.defaults`](./sdkconfig.defaults), add:
+
+```text
+CONFIG_DEFAULT_WIFI_SSID="<your wifi ssid>"
+CONFIG_DEFAULT_WIFI_PASSWORD="<your wifi password>"
+```
+
 ```bash
 export TOOLCHAINS=org.swift.<toolchain-id>
 export IDF_PATH=<path to esp-idf>
@@ -64,13 +71,6 @@ source $ESP_MATTER_PATH/export.sh
 idf.py set-target esp32c3
 idf.py build
 idf.py -p /dev/tty.usbserial-* flash monitor
-```
-
-Setting Wi-Fi credentials into [`sdkconfig.defaults`](./sdkconfig.defaults), add:
-
-```text
-CONFIG_DEFAULT_WIFI_SSID="<your wifi ssid>"
-CONFIG_DEFAULT_WIFI_PASSWORD="<your wifi password>"
 ```
 
 ## Customize This Template
