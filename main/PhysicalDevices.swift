@@ -59,6 +59,10 @@ final class Button {
         }
 
         let button = Unmanaged<Button>.fromOpaque(param).takeUnretainedValue()
+
+        // Let Matter platform layer fully initialize before accepting presses
+        vTaskDelay(msToTicks(5000))
+
         var lastLevel = gpio_get_level(Button.pin)
 
         while true {

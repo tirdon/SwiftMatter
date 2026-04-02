@@ -2,6 +2,7 @@
 
 // update attribute
 func send_command(to endpoint: UInt16, with commandID: chip.CommandId) {
+    if !esp_matter.is_started() { return }
     var req = esp_matter.client.request_handle_t()
     req.type = esp_matter.client.INVOKE_CMD
 
