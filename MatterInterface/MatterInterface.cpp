@@ -10,6 +10,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "BridgingHeader.h"
+#include "driver/spi_master.h"
 #include "esp_err.h"
 #include "esp_matter_client.h"
 #include "esp_matter_core.h"
@@ -63,12 +64,12 @@ void printFabricInfo() {
   const auto &fabricTable = chip::Server::GetInstance().GetFabricTable();
   printf("Fabric count: %u\n", fabricTable.FabricCount());
   for (const auto &fabricInfo : fabricTable) {
-    printf("  Fabric index: %u\n", fabricInfo.GetFabricIndex());
-    printf("    Fabric ID: 0x%" PRIx64 "\n", fabricInfo.GetFabricId());
-    printf("    Compressed Fabric ID: 0x%" PRIx64 "\n",
+    printf("    Fabric index: %u\n", fabricInfo.GetFabricIndex());
+    printf("\tFabric ID: 0x%" PRIx64 "\n", fabricInfo.GetFabricId());
+    printf("\tCompressed Fabric ID: 0x%" PRIx64 "\n",
            fabricInfo.GetCompressedFabricId());
-    printf("    Node ID: 0x%" PRIx64 "\n", fabricInfo.GetNodeId());
-    printf("    Vendor ID: 0x%04x\n", fabricInfo.GetVendorId());
+    printf("\tNode ID: 0x%" PRIx64 "\n", fabricInfo.GetNodeId());
+    printf("\tVendor ID: 0x%04x\n", fabricInfo.GetVendorId());
   }
 }
 
@@ -214,8 +215,8 @@ void print_bindings_shim(uint16_t endpoint_id) {
 // MARK: bind
 // =======================================================================
 namespace {
-constexpr uint16_t kMinSubscribeIntervalSeconds = 1;
-constexpr uint16_t kMaxSubscribeIntervalSeconds = 60;
+constexpr uint16_t kMinSubscribeIntervalSeconds = 5;
+constexpr uint16_t kMaxSubscribeIntervalSeconds = 2 * 60;
 
 bool is_onoff_attribute_path(const chip::app::AttributePathParams &path) {
   return path.mClusterId == chip::app::Clusters::OnOff::Id &&
@@ -287,6 +288,9 @@ void on_server_update(esp_matter::client::peer_device_t *peer_device,
       return;
     }
 
+    // Forward the on/off command (Toggle, On, Off) to the bound remote device.
+    // send_command() in Swift sets req.type = INVOKE_CMD, so this is the path
+    // triggered by button press and IR remote.
     esp_matter::client::interaction::invoke::send_request(
         nullptr, peer_device, req_handle->command_path, "{}",
         send_command_success_callback, send_command_failure_callback,
@@ -294,6 +298,10 @@ void on_server_update(esp_matter::client::peer_device_t *peer_device,
     return;
   }
 
+  // The Matter binding client can also issue READ_ATTR requests to sync the
+  // current on/off state from a bound device (e.g. after reconnection).
+  // OnOffReadCallback::OnAttributeData() calls update_local_led_shim() to
+  // keep the local LED in sync with the remote device's actual state.
   if (req_handle->type == esp_matter::client::READ_ATTR) {
     if (!is_onoff_attribute_path(req_handle->attribute_path)) {
       return;
@@ -305,6 +313,7 @@ void on_server_update(esp_matter::client::peer_device_t *peer_device,
     return;
   }
 
+  // To get notified on every remote attribute change
   if (req_handle->type != esp_matter::client::SUBSCRIBE_ATTR) {
     return;
   }
@@ -333,4 +342,47 @@ void on_group_request(uint8_t fabric_index,
   esp_matter::client::interaction::invoke::send_group_request(
       fabric_index, req_handle->command_path, "{}");
   printf("[LIGHT] Group toggle sent\n");
+}
+
+// SPI master shims
+
+esp_err_t spi_bus_init_shim(int32_t host, int32_t mosi_pin, int32_t miso_pin,
+                            int32_t sclk_pin, int32_t max_transfer_sz) {
+  spi_bus_config_t bus_cfg = {};
+  bus_cfg.mosi_io_num = mosi_pin;
+  bus_cfg.miso_io_num = miso_pin;
+  bus_cfg.sclk_io_num = sclk_pin;
+  bus_cfg.quadwp_io_num = -1;
+  bus_cfg.quadhd_io_num = -1;
+  bus_cfg.max_transfer_sz = max_transfer_sz;
+  return spi_bus_initialize((spi_host_device_t)host, &bus_cfg, SPI_DMA_CH_AUTO);
+}
+
+esp_err_t spi_add_device_shim(int32_t host, int32_t cs_pin,
+                              int32_t clock_speed_hz, int32_t mode,
+                              int32_t queue_size, void **out_handle) {
+  spi_device_interface_config_t dev_cfg = {};
+  dev_cfg.clock_speed_hz = clock_speed_hz;
+  dev_cfg.mode = mode;
+  dev_cfg.spics_io_num = cs_pin;
+  dev_cfg.queue_size = queue_size;
+  return spi_bus_add_device((spi_host_device_t)host, &dev_cfg,
+                            (spi_device_handle_t *)out_handle);
+}
+
+esp_err_t spi_transfer_shim(void *handle, const uint8_t *tx_data,
+                            uint8_t *rx_data, size_t length) {
+  spi_transaction_t trans = {};
+  trans.length = length * 8; // length in bits
+  trans.tx_buffer = tx_data;
+  trans.rx_buffer = rx_data;
+  return spi_device_transmit((spi_device_handle_t)handle, &trans);
+}
+
+esp_err_t spi_remove_device_shim(void *handle) {
+  return spi_bus_remove_device((spi_device_handle_t)handle);
+}
+
+esp_err_t spi_bus_free_shim(int32_t host) {
+  return spi_bus_free((spi_host_device_t)host);
 }

@@ -12,20 +12,15 @@ func main() -> Never {
 
 	print("Hello! Embedded Swift is running!")
 
-	let err = nvs_flash_init()
-	if err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND {
-		nvs_flash_erase()
-		nvs_flash_init()
-	}
-
 	globalLED = LED()
 
 	let rootNode = Matter.Node(name: "Irrigation Controller")
 	rootNode.identifyHandler = { print("identify") }
 
-	let switchEndpoint = Matter.SwitchEndpoint(rootNode: rootNode)
+	let switchEndpoint = Matter.SwitchClientEndpoint(rootNode: rootNode)
 
-	let button = Button(endpoint: switchEndpoint.id, led: globalLED)
+	let button = Button(endpoint: switchEndpoint.id)
+	let ir = IRSensor(endpoint: switchEndpoint.id)
 
 	rootNode.addEndpoint(switchEndpoint)
 
@@ -38,6 +33,7 @@ func main() -> Never {
 	app.start()
 
 	button.start()
+	ir.start()
 
 	while true { sleep(1) }
 }

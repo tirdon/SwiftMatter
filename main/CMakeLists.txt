@@ -83,6 +83,7 @@ target_sources(${COMPONENT_LIB}
     PRIVATE
     Main.swift
     PhysicalDevices.swift
+    SPI.swift
     SwitchEndpoint.swift
     ../MatterInterface/Core.swift
     ../MatterInterface/Core+ID.swift

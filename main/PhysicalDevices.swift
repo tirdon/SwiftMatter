@@ -1,7 +1,7 @@
 // MARK: - Helpers
 
 /// Convert milliseconds to FreeRTOS ticks.
-internal func msToTicks(_ ms: UInt32) -> UInt32 {
+func msToTicks(_ ms: UInt32) -> UInt32 {
     ms * UInt32(configTICK_RATE_HZ) / 1000
 }
 
@@ -13,8 +13,8 @@ private func delayUs(_ us: Int64) {
 
 //MARK: - LED
 final class LED: GPIO {
-    private static let pin = GPIO_NUM_16
-
+    static let pin = GPIO_NUM_22
+    private static let groundPin = GPIO_NUM_16
     var enabled: Bool = false {
         didSet {
             gpio_set_level(LED.pin, enabled ? 1 : 0)
@@ -23,8 +23,11 @@ final class LED: GPIO {
 
     init() {
         gpio_reset_pin(LED.pin)
+        gpio_reset_pin(LED.groundPin)
         gpio_set_direction(LED.pin, GPIO_MODE_OUTPUT)
+        gpio_set_direction(LED.groundPin, GPIO_MODE_OUTPUT)
         gpio_set_level(LED.pin, 0)
+        gpio_set_level(LED.groundPin, 0)
 
         _ = Unmanaged.passRetained(self)
     }
@@ -32,16 +35,14 @@ final class LED: GPIO {
 
 //MARK: - Button
 final class Button {
-    private static let pin = GPIO_NUM_17
+    private static let pin = GPIO_NUM_1
     private static let pollIntervalMs: UInt32 = 10
     private static let debounceMs: UInt32 = 30
 
     private let id: UInt16
-    var led: LED
 
-    init(endpoint id: UInt16, led: LED) {
+    init(endpoint id: UInt16) {
         self.id = id
-        self.led = led
 
         gpio_reset_pin(Button.pin)
         gpio_set_direction(Button.pin, GPIO_MODE_INPUT)
@@ -81,11 +82,12 @@ final class Button {
         }
     }
 
+    // call after Matter is initialized
     func start() {
         xTaskCreate(
             Button.buttonTask,
             "button_task",
-            4096,
+            2048,
             Unmanaged.passUnretained(self).toOpaque(),
             4,
             nil
@@ -93,8 +95,8 @@ final class Button {
     }
 
     private func handlePress() {
-        send_to_bound(with: chip.app.Clusters.OnOff.Commands.Toggle.Id)
-        print("button is pressed: Toggle sent to bound devices.")
+        send_command(to: self.id, with: chip.app.Clusters.OnOff.Commands.Toggle.Id)
+        // print("button is pressed: Toggle sent to bound devices.")
     }
 
     /*
@@ -108,26 +110,25 @@ final class Button {
             &att_dataType
         )
     }*/
-
-    func send_to_bound(with commandID: chip.CommandId) {
-        var req = esp_matter.client.request_handle_t()
-        req.type = esp_matter.client.INVOKE_CMD
-
-        req.command_path.mClusterId = chip.app.Clusters.OnOff.Id
-        req.command_path.mCommandId = commandID
-        esp_matter.client.cluster_update_shim(self.id, &req)
-    }
 }
 
-//MARK: - DHT22
 /*
+//MARK: - DHT22
 final class DHT22Sensor {
-    private let gpio = GPIO_NUM_4
-    private var temperature: Float = 0.0
-    private var humidity: Float = 0.0
+    // DHT22 protocol timing (microseconds)
+    private enum Timing {
+        static let startLow: Int64 = 20_000  // Pull low >= 18ms to start
+        static let responseTimeout: Int64 = 100  // Max wait for DHT response phases
+        static let bitLowTimeout: Int64 = 65  // Max ~50us LOW per data bit
+        static let bitHighTimeout: Int64 = 80  // Max ~70us HIGH per data bit
+    }
 
     /// Read interval in milliseconds.
     private static let readIntervalMs: UInt32 = 10_000
+
+    private let gpio: gpio_num_t = GPIO_NUM_4
+    private var temperature: Float = 0.0
+    private var humidity: Float = 0.0
 
     private let humidityId: UInt16
     private let temperatureId: UInt16
@@ -137,38 +138,111 @@ final class DHT22Sensor {
         self.temperatureId = t_id
 
         gpio_reset_pin(gpio)
-        gpio_set_direction(gpio, GPIO_MODE_OUTPUT)
-        gpio_set_level(gpio, 0)
         gpio_set_direction(gpio, GPIO_MODE_INPUT_OUTPUT_OD)
         gpio_set_level(gpio, 1)
-        gpio_set_intr_type(gpio, GPIO_INTR_DISABLE)
-        gpio_set_level(gpio, 0)
 
         _ = Unmanaged.passRetained(self)
+    }
+
+    /// Wait for pin to reach expected level. Returns wait duration in microseconds, or -1 on timeout.
+    private func awaitPin(_ level: Int32, timeout: Int64) -> Int64 {
+        let start = esp_timer_get_time()
+        while gpio_get_level(gpio) != level {
+            if esp_timer_get_time() - start > timeout { return -1 }
+        }
+        return esp_timer_get_time() - start
+    }
+
+    /// Read one byte (8 bits, MSB first). Returns nil on timeout.
+    private func readByte() -> UInt8? {
+        var byte: UInt8 = 0
+        for i in 0..<8 {
+            let lowDur = awaitPin(1, timeout: Timing.bitLowTimeout)
+            if lowDur < 0 { return nil }
+            let highDur = awaitPin(0, timeout: Timing.bitHighTimeout)
+            if highDur < 0 { return nil }
+            if highDur > lowDur {
+                byte |= (1 << UInt8(7 - i))
+            }
+        }
+        return byte
+    }
+
+    /// Read humidity and temperature from the DHT22 sensor.
+    func readData() -> (humidity: Float, temperature: Float)? {
+        // Send start signal: pull LOW for >= 18ms, then release
+        gpio_set_direction(gpio, GPIO_MODE_OUTPUT_OD)
+        gpio_set_level(gpio, 0)
+        delayUs(Timing.startLow)
+        gpio_set_level(gpio, 1)
+
+        // Switch to input and wait for DHT response
+        gpio_set_direction(gpio, GPIO_MODE_INPUT)
+        // Phase B: wait for DHT to pull LOW
+        if awaitPin(0, timeout: Timing.responseTimeout) < 0 { return nil }
+        // Phase C: DHT pulls LOW ~80us, wait for HIGH
+        if awaitPin(1, timeout: Timing.responseTimeout) < 0 { return nil }
+        // Phase D: DHT releases ~80us, wait for LOW (first data bit start)
+        if awaitPin(0, timeout: Timing.responseTimeout) < 0 { return nil }
+
+        // Read 5 bytes (40 bits)
+        guard let b0 = readByte(),
+            let b1 = readByte(),
+            let b2 = readByte(),
+            let b3 = readByte(),
+            let b4 = readByte()
+        else {
+            gpio_set_direction(gpio, GPIO_MODE_INPUT_OUTPUT_OD)
+            gpio_set_level(gpio, 1)
+            return nil
+        }
+
+        // Restore idle state
+        gpio_set_direction(gpio, GPIO_MODE_INPUT_OUTPUT_OD)
+        gpio_set_level(gpio, 1)
+
+        // Verify checksum
+        if b4 != UInt8((UInt16(b0) + UInt16(b1) + UInt16(b2) + UInt16(b3)) & 0xFF) {
+            return nil
+        }
+
+        // Parse humidity: bytes 0-1, value / 10.0
+        let rawHumidity = (UInt16(b0) << 8) | UInt16(b1)
+        let h = Float(rawHumidity) / 10.0
+
+        // Parse temperature: bytes 2-3, value / 10.0, bit 15 = sign
+        let rawTemp = (UInt16(b2) << 8) | UInt16(b3)
+        var t = Float(rawTemp & 0x7FFF) / 10.0
+        if rawTemp & 0x8000 != 0 { t = -t }
+
+        return (h, t)
     }
 
     static let dht_rx_task: @convention(c) (UnsafeMutableRawPointer?) -> Void = { param in
         print("DHT22 Task started")
         guard let param else { return }
-        let dht = Unmanaged<DHT22Sensor>.fromOpaque(param).takeRetainedValue()
+        let dht = Unmanaged<DHT22Sensor>.fromOpaque(param).takeUnretainedValue()
         var savedHumidity: Float = 0.0
         var savedTemperature: Float = 0.0
+        var updateCount = 0
 
         while true {
-            let res = dht_read_float_data(
-                DHT_TYPE_AM2301, dht.gpio, &dht.humidity, &dht.temperature)
-
-            if res == ESP_OK
-                && (dht.humidity != savedHumidity
-                    || dht.temperature != savedTemperature)
-            {
-                savedHumidity = dht.humidity
-                savedTemperature = dht.temperature
-                dht.update_temp()
-                dht.update_humidity()
+            if let reading = dht.readData() {
+                if reading.humidity != savedHumidity
+                    || reading.temperature != savedTemperature
+                {
+                    savedHumidity = reading.humidity
+                    savedTemperature = reading.temperature
+                    dht.humidity = reading.humidity
+                    dht.temperature = reading.temperature
+                    dht.update_temp()
+                    dht.update_humidity()
+                }
             }
-
-            vTaskDelay(msToTicks(readIntervalMs))
+            if updateCount < 5 {
+                vTaskDelay(msToTicks(500))
+                updateCount += 1
+            } else { vTaskDelay(msToTicks(readIntervalMs)) }
         }
     }
 
@@ -200,7 +274,6 @@ final class DHT22Sensor {
 
 //MARK: - IR
 
-/*
 final class IRSensor {
     enum NecResult {
         case frame(UInt32)
@@ -234,10 +307,8 @@ final class IRSensor {
     /// Debounce delay in milliseconds after decoding.
     private static let debounceMs: UInt32 = 1_000
 
-    private let gpio: gpio_num_t = GPIO_NUM_0
+    private let gpio: gpio_num_t = GPIO_NUM_2
     var taskHandle: TaskHandle_t? = nil
-
-    let led: LED
 
     // GPIO ISR: fires on falling edge, notifies the IR task
     private static let gpioISR: gpio_isr_t = { arg in
@@ -252,8 +323,10 @@ final class IRSensor {
         portYIELD_FROM_ISR_shim(xHigherPriorityTaskWoken)
     }
 
-    init(led: LED) {
-        self.led = led
+    private let id: UInt16
+
+    init(endpoint id: UInt16) {
+        self.id = id
         gpio_reset_pin(gpio)
         gpio_set_direction(gpio, GPIO_MODE_INPUT)
         gpio_pullup_en(gpio)
@@ -271,10 +344,11 @@ final class IRSensor {
 
         switch command {
         case Command.powerOff:
-            self.led.enabled = false
+            send_command(to: self.id, with: chip.app.Clusters.OnOff.Commands.Off.Id)
         case Command.powerOn:
-            self.led.enabled = true
+            send_command(to: self.id, with: chip.app.Clusters.OnOff.Commands.On.Id)
         default:
+            print("Unknown command: \(command)")
             break
         }
     }
@@ -329,7 +403,7 @@ final class IRSensor {
         print("IR Task started")
 
         guard let param else { return }
-        let ir = Unmanaged<IRSensor>.fromOpaque(param).takeRetainedValue()
+        let ir = Unmanaged<IRSensor>.fromOpaque(param).takeUnretainedValue()
 
         ir.taskHandle = xTaskGetCurrentTaskHandle()
 
@@ -376,7 +450,21 @@ final class IRSensor {
             gpio_intr_enable(ir.gpio)
         }
     }
+
+    func start() {
+        xTaskCreate(
+            IRSensor.ir_rx_task,
+            "ir_rx_task",
+            4096,
+            Unmanaged.passUnretained(self).toOpaque(),
+            3,
+            nil
+        )
+    }
+
 }
+
+/*
 
 //MARK: - DS18B20
 
@@ -517,7 +605,7 @@ final class DS18B20Sensor {
     static let ds18b20_task: @convention(c) (UnsafeMutableRawPointer?) -> Void = { param in
         print("DS18B20 Task started")
         guard let param else { return }
-        let sensor = Unmanaged<DS18B20Sensor>.fromOpaque(param).takeRetainedValue()
+        let sensor = Unmanaged<DS18B20Sensor>.fromOpaque(param).takeUnretainedValue()
         var savedTemperature: Float = -999.0
 
         while true {
@@ -578,7 +666,7 @@ final class MakerSoilMoistureSensor {
     static let moisture_task: @convention(c) (UnsafeMutableRawPointer?) -> Void = { param in
         print("MakerSoilMoisture Task started")
         guard let param else { return }
-        let sensor = Unmanaged<MakerSoilMoistureSensor>.fromOpaque(param).takeRetainedValue()
+        let sensor = Unmanaged<MakerSoilMoistureSensor>.fromOpaque(param).takeUnretainedValue()
         var savedMoisture: Float = -999.0
 
         while true {
@@ -741,7 +829,7 @@ final class IRTransmitter {
         print("IR TX Task started")
 
         guard let param else { return }
-        let tx = Unmanaged<IRTransmitter>.fromOpaque(param).takeRetainedValue()
+        let tx = Unmanaged<IRTransmitter>.fromOpaque(param).takeUnretainedValue()
 
         tx.taskHandle = xTaskGetCurrentTaskHandle()
 
@@ -762,4 +850,5 @@ final class IRTransmitter {
         }
     }
 }
+
 */

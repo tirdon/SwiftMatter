@@ -29,6 +29,7 @@
 // #include <device.h>
 // #include <driver/adc.h>
 #include <driver/gpio.h>
+#include <driver/spi_master.h>
 #include <driver/rmt_rx.h> // rx = receive, tx = transmit
 #include <driver/rmt_tx.h>
 #include <nvs_flash.h>

@@ -1,7 +1,18 @@
 // SwitchEndpoint.swift
 
+// update attribute
+func send_command(to endpoint: UInt16, with commandID: chip.CommandId) {
+    var req = esp_matter.client.request_handle_t()
+    req.type = esp_matter.client.INVOKE_CMD
+
+    req.command_path.mClusterId = chip.app.Clusters.OnOff.Id
+    req.command_path.mCommandId = commandID
+    esp_matter.client.cluster_update_shim(endpoint, &req)
+}
+
+//MARK: Endpoint
 extension Matter {
-    class SwitchEndpoint: Endpoint {
+    class SwitchClientEndpoint: Endpoint {
         static var deviceTypeId: UInt32 {
             esp_matter.endpoint.on_off_light_switch.get_device_type_id()
         }

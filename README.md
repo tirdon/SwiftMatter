@@ -194,6 +194,65 @@ The IR task uses a **GPIO ISR + `ulTaskNotifyTake`** pattern instead of busy-pol
 - **Signal**: hardware interrupt wakes the task instantly on falling edge
 - **Timeout**: after 300ms of no activity, stale repeat state is cleared
 
+## SPI Master (Offline Device-to-Device)
+
+The `SPIDevice` class in `main/SPI.swift` provides SPI master communication for talking to another microcontroller or peripheral without WiFi/Matter.
+
+### Wiring
+
+| Signal | Default GPIO | Notes |
+|--------|-------------|-------|
+| MOSI   | Configurable | Master Out, Slave In |
+| MISO   | Configurable | Master In, Slave Out |
+| SCLK   | Configurable | Serial Clock |
+| CS     | Configurable | Chip Select (active low) |
+
+### API
+
+```swift
+// Initialize: SPI2_HOST = 1, 1 MHz clock, SPI mode 0
+let spi = SPIDevice(host: 1, mosi: GPIO_NUM_6, miso: GPIO_NUM_7,
+                    sclk: GPIO_NUM_10, cs: GPIO_NUM_11)
+
+// Full-duplex transfer
+spi.transfer(tx: txPtr, rx: rxPtr, length: 4)
+
+// Send only
+spi.send(dataPtr, length: 2)
+
+// Receive only (sends zeros on MOSI)
+spi.receive(bufPtr, length: 8)
+
+// Command + response (sends 1 byte, then reads responseLength bytes)
+spi.command(0x01, response: bufPtr, responseLength: 4)
+```
+
+### FreeRTOS Task Mode
+
+For periodic polling, call `spi.start()` to launch a background task. Use `spi.enqueue(tx:length:)` to send data on the next cycle, and set `spi.onReceive` to handle responses.
+
+### C++ Shims
+
+The ESP-IDF SPI master API uses complex C structs (`spi_bus_config_t`, `spi_device_interface_config_t`, `spi_transaction_t`) that are cumbersome to initialize from Embedded Swift. The following shims in `MatterInterface.h/.cpp` wrap the struct setup:
+
+| Swift Function | Wraps |
+|---|---|
+| `spi_bus_init_shim(host, mosi, miso, sclk, maxSize)` | `spi_bus_initialize` with `spi_bus_config_t` setup |
+| `spi_add_device_shim(host, cs, hz, mode, queueSz, &handle)` | `spi_bus_add_device` with `spi_device_interface_config_t` setup |
+| `spi_transfer_shim(handle, txBuf, rxBuf, len)` | `spi_device_transmit` with `spi_transaction_t` setup |
+| `spi_remove_device_shim(handle)` | `spi_bus_remove_device` |
+| `spi_bus_free_shim(host)` | `spi_bus_free` |
+
+## Matter Client Callbacks (`on_server_update`)
+
+The `on_server_update` callback registered via `set_request_callback` handles outbound interactions with bound remote devices. It dispatches on `req_handle->type`:
+
+| Type | Trigger | Action |
+|------|---------|--------|
+| `INVOKE_CMD` | `send_command()` from button press or IR remote | Forwards On/Off/Toggle command to the bound device |
+| `READ_ATTR` | Matter framework (e.g. after reconnection) | Reads the remote device's OnOff attribute; `OnOffReadCallback` calls `update_local_led_shim()` to sync the local LED |
+| `SUBSCRIBE_ATTR` | *(commented out)* | Would subscribe to live attribute updates from the bound device |
+
 ## License
 
 This project is released under the [Creative Commons Zero (CC0 1.0 Universal)](https://creativecommons.org/publicdomain/zero/1.0/) license. You can copy, modify, distribute and perform the work, even for commercial purposes, all without asking permission.

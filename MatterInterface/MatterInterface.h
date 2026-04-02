@@ -68,6 +68,17 @@ void vTaskNotifyGiveFromISR_shim(TaskHandle_t xTaskToNotify,
 void portYIELD_FROM_ISR_shim(int32_t xHigherPriorityTaskWoken);
 void xTaskNotifyGive_shim(TaskHandle_t xTaskToNotify);
 
+// SPI master shims
+esp_err_t spi_bus_init_shim(int32_t host, int32_t mosi_pin, int32_t miso_pin,
+                            int32_t sclk_pin, int32_t max_transfer_sz);
+esp_err_t spi_add_device_shim(int32_t host, int32_t cs_pin,
+                              int32_t clock_speed_hz, int32_t mode,
+                              int32_t queue_size, void **out_handle);
+esp_err_t spi_transfer_shim(void *handle, const uint8_t *tx_data,
+                            uint8_t *rx_data, size_t length);
+esp_err_t spi_remove_device_shim(void *handle);
+esp_err_t spi_bus_free_shim(int32_t host);
+
 void on_server_update(esp_matter::client::peer_device_t *peer_device,
                       esp_matter::client::request_handle_t *req_handle,
                       void *priv_data);
