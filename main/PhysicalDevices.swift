@@ -87,7 +87,7 @@ final class Button {
         xTaskCreate(
             Button.buttonTask,
             "button_task",
-            2048,
+            8192,
             Unmanaged.passUnretained(self).toOpaque(),
             4,
             nil
