@@ -1,9 +1,9 @@
 // MARK: - SPI
 
-/// SPI master driver for device-to-device communication without WiFi/Matter.
+/// SPI master driver for device-to-device communication.
 ///
 /// Uses ESP-IDF SPI master driver via C shims. Supports full-duplex transfers,
-/// send-only, receive-only, and a FreeRTOS polling task for periodic exchanges.
+/// send-only, receive-only, and a FreeRTOS polling task for periodic reads.
 final class SPIDevice {
     static let maxTransferSize: Int32 = 4096
 
@@ -11,14 +11,12 @@ final class SPIDevice {
     private let host: Int32
 
     /// Poll interval in milliseconds for the FreeRTOS task.
-    private static let pollIntervalMs: UInt32 = 1_000
+    static var pollIntervalMs: UInt32 = 1_000
 
     /// Callback invoked on the polling task when data is received.
     /// Parameters: pointer to received buffer, length.
     var onReceive: ((UnsafePointer<UInt8>, Int) -> Void)? = nil
 
-    /// Transmit buffer set before notifying the task.
-    private var pendingTx: (UnsafePointer<UInt8>, Int)? = nil
     var taskHandle: TaskHandle_t? = nil
 
     init(
@@ -69,50 +67,27 @@ final class SPIDevice {
         return transfer(tx: nil, rx: buffer, length: length)
     }
 
-    /// Send a command byte, then read a response.
-    func command(
-        _ cmd: UInt8, response: UnsafeMutablePointer<UInt8>,
-        responseLength: Int
-    ) -> esp_err_t {
-        var cmdByte = cmd
-        let err = send(&cmdByte, length: 1)
-        if err != ESP_OK { return err }
-        return receive(response, length: responseLength)
-    }
-
-    /// Enqueue data for the polling task to transmit on the next cycle.
-    func enqueue(tx: UnsafePointer<UInt8>, length: Int) {
-        pendingTx = (tx, length)
-        guard let handle = taskHandle else { return }
-        xTaskNotifyGive_shim(handle)
-    }
-
     // MARK: - FreeRTOS Task
 
+    /// Polling task that periodically reads sensor data from SPI slave.
     static let spi_poll_task: @convention(c) (UnsafeMutableRawPointer?) -> Void = { param in
         print("SPI Task started")
         guard let param else { return }
         let spi = Unmanaged<SPIDevice>.fromOpaque(param).takeUnretainedValue()
-
         spi.taskHandle = xTaskGetCurrentTaskHandle()
 
+        let rxSize = SensorData.wireSize
+        let rxBuf = UnsafeMutablePointer<UInt8>.allocate(capacity: rxSize)
+
         while true {
-            let notified = ulTaskNotifyTake_shim(1, msToTicks(pollIntervalMs))
-
-            if notified != 0, let (txBuf, txLen) = spi.pendingTx {
-                // Allocate rx buffer on the stack-ish area for the response
-                let rxBuf = UnsafeMutablePointer<UInt8>.allocate(capacity: txLen)
-                let err = spi.transfer(tx: txBuf, rx: rxBuf, length: txLen)
-                if err == ESP_OK {
-                    spi.onReceive?(UnsafePointer(rxBuf), txLen)
-                } else {
-                    print("SPI transfer failed: \(err)")
-                }
-                rxBuf.deallocate()
-                spi.pendingTx = nil
-            }
-
             vTaskDelay(msToTicks(pollIntervalMs))
+
+            let err = spi.receive(rxBuf, length: rxSize)
+            if err == ESP_OK {
+                spi.onReceive?(UnsafePointer(rxBuf), rxSize)
+            } else {
+                print("SPI receive failed: \(err)")
+            }
         }
     }
 

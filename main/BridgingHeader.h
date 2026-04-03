@@ -9,78 +9,52 @@
 //
 //===----------------------------------------------------------------------===//
 
-// C standard library
-// ==================================================
-
-// #include <stdio.h>
-// #include <math.h>
-
 // FreeRTOS
 // ==================================================
 
-// #include <cstddef>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
 
-// Device
+// Device drivers
 // ==================================================
 
-// #include <device.h>
-// #include <driver/adc.h>
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
-#include <driver/rmt_rx.h> // rx = receive, tx = transmit
-#include <driver/rmt_tx.h>
 #include <nvs_flash.h>
 #include <sdkconfig.h>
 
-// ESP IDF
+// ESP-IDF core
 // ==================================================
 
 #include <esp_err.h>
 #include <esp_log.h>
 #include <esp_rom_sys.h>
-#include <esp_sleep.h>
 #include <esp_timer.h>
-// #include <esp_sntp.h>
-// #include <esp_netif.h>
 
-// ESP Matter
+// WiFi & Networking
 // ==================================================
 
-#define CHIP_HAVE_CONFIG_H 1
-#define CHIP_USE_ENUM_CLASS_FOR_IM_ENUM 1
-#define CHIP_ADDRESS_RESOLVE_IMPL_INCLUDE_HEADER                               \
-<lib/address_resolve/AddressResolve_DefaultImpl.h>
+#include <esp_wifi.h>
+#include <esp_event.h>
+#include <esp_netif.h>
+#include <esp_http_client.h>
 
-// There seems to be assumption in FabricTable.h that strnlen is implicitly
-// available via some other headers, but that turns out to not be the case when
-// importing these headers in Swift. Let's manually declare strnlen as a
-// workaround.
-//
-// connectedhomeip/src/credentials/FabricTable.h:82:69: error: use of undeclared
-// identifier 'strnlen'
-extern "C" size_t strnlen(const char *s, size_t maxlen);
-// esp-matter/components/esp_matter/esp_matter_client.h:57:26: error: use of
-// undeclared identifier 'strdup'
-extern "C" char *strdup(const char *s1);
-
-#include <esp_matter.h>
-// #include <esp_matter_ota.h>
-
-// ConnectedHomeIP
-// ===================================================
-
-#include <app-common/zap-generated/ids/Attributes.h>
-#include <app-common/zap-generated/ids/Clusters.h>
-// #include <app-common/zap-generated/ids/Commands.h>
-
-#include <app/server/Server.h>
-#include <platform/CHIPDeviceLayer.h>
-#include <system/SystemClock.h>
-
-// Swift Matter interface
-// ===================================================
+// Shims
+// ==================================================
 
 #include "../MatterInterface/MatterInterface.h"
+
+// --- Matter/CHIP headers (commented out, waiting for 8MB flash) ---
+// #define CHIP_HAVE_CONFIG_H 1
+// #define CHIP_USE_ENUM_CLASS_FOR_IM_ENUM 1
+// #define CHIP_ADDRESS_RESOLVE_IMPL_INCLUDE_HEADER \
+//     <lib/address_resolve/AddressResolve_DefaultImpl.h>
+// extern "C" size_t strnlen(const char *s, size_t maxlen);
+// extern "C" char *strdup(const char *s1);
+// #include <esp_matter.h>
+// #include <app-common/zap-generated/ids/Attributes.h>
+// #include <app-common/zap-generated/ids/Clusters.h>
+// #include <app/server/Server.h>
+// #include <platform/CHIPDeviceLayer.h>
+// #include <system/SystemClock.h>

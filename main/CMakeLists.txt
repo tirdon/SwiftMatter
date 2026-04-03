@@ -2,6 +2,7 @@
 idf_component_register(
     SRCS "../MatterInterface/MatterInterface.cpp"
     PRIV_INCLUDE_DIRS "."
+    PRIV_REQUIRES driver esp_wifi esp_http_client esp_event nvs_flash esp_netif esp_timer
     LDFRAGMENTS "linker.lf"
 )
 
@@ -10,7 +11,6 @@ get_target_property(var ${COMPONENT_LIB} COMPILE_OPTIONS)
 set_target_properties(${COMPONENT_LIB} PROPERTIES COMPILE_OPTIONS "")
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
-target_compile_options(${COMPONENT_LIB} PRIVATE "-DCHIP_HAVE_CONFIG_H")
 
 # Compute -Xcc flags to set up the C and C++ header search paths for Swift (for bridging header).
 set(SWIFT_INCLUDES)
@@ -24,7 +24,6 @@ foreach(dir ${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES})
 endforeach()
 
 # Set device-specific march/mabi flags
-# idf_build_get_property(target IDF_TARGET)
 if(${target} STREQUAL "esp32c2" OR ${target} STREQUAL "esp32c3")
     set(march_flag "rv32imc_zicsr_zifencei")
     set(mabi_flag "ilp32")
@@ -41,31 +40,28 @@ target_compile_options(${COMPONENT_LIB} PUBLIC "$<$<COMPILE_LANGUAGE:Swift>:SHEL
         -target riscv32-none-none-eabi
         -Xfrontend -function-sections -enable-experimental-feature Embedded -wmo -parse-as-library -Osize
         -color-diagnostics
-        -Xcc -DCHIP_HAVE_CONFIG_H
         -Xcc -std=c++17
         -cxx-interoperability-mode=default
         -Xcc -fno-exceptions
         -Xcc -fno-rtti
 
-        -Xcc -DESP_PLATFORM 
-        -Xcc -DIDF_VER=\"v5.3-dev-2815-gbe06a6f5ff-dirty\" 
-        -Xcc -DLV_CONF_INCLUDE_SIMPLE 
-        -Xcc -DMBEDTLS_CONFIG_FILE=\"mbedtls/esp_config.h\" 
-        -Xcc -DMD5_ENABLED=1 
-        -Xcc -DSERIAL_FLASHER_BOOT_HOLD_TIME_MS=50 
-        -Xcc -DSERIAL_FLASHER_RESET_HOLD_TIME_MS=100 
-        -Xcc -DSOC_MMU_PAGE_SIZE=CONFIG_MMU_PAGE_SIZE 
-        -Xcc -DSOC_XTAL_FREQ_MHZ=CONFIG_XTAL_FREQ 
-        -Xcc -DUNITY_INCLUDE_CONFIG_H 
-        -Xcc -D_GLIBCXX_HAVE_POSIX_SEMAPHORE 
-        -Xcc -D_GLIBCXX_USE_POSIX_SEMAPHORE 
+        -Xcc -DESP_PLATFORM
+        -Xcc -DMBEDTLS_CONFIG_FILE=\"mbedtls/esp_config.h\"
+        -Xcc -DMD5_ENABLED=1
+        -Xcc -DSERIAL_FLASHER_BOOT_HOLD_TIME_MS=50
+        -Xcc -DSERIAL_FLASHER_RESET_HOLD_TIME_MS=100
+        -Xcc -DSOC_MMU_PAGE_SIZE=CONFIG_MMU_PAGE_SIZE
+        -Xcc -DSOC_XTAL_FREQ_MHZ=CONFIG_XTAL_FREQ
+        -Xcc -DUNITY_INCLUDE_CONFIG_H
+        -Xcc -D_GLIBCXX_HAVE_POSIX_SEMAPHORE
+        -Xcc -D_GLIBCXX_USE_POSIX_SEMAPHORE
         -Xcc -D_POSIX_READER_WRITER_LOCKS
         -Xcc -march=${march_flag}
         -Xcc -mabi=${mabi_flag}
 
         -pch-output-dir /tmp
         -Xfrontend -enable-single-module-llvm-emission
-        
+
         ${SWIFT_INCLUDES}
 
         -import-bridging-header ${CMAKE_CURRENT_LIST_DIR}/BridgingHeader.h
@@ -82,13 +78,7 @@ enable_language(Swift)
 target_sources(${COMPONENT_LIB}
     PRIVATE
     Main.swift
-    PhysicalDevices.swift
     SPI.swift
-    SwitchEndpoint.swift
-    ../MatterInterface/Core.swift
-    ../MatterInterface/Core+ID.swift
-    ../MatterInterface/Core+RootNode.swift
-    ../MatterInterface/Matter.swift
-    ../MatterInterface/Matter+Application.swift
-    ../MatterInterface/Matter+OnBoardLED.swift
+    SensorData.swift
+    HTTPClient.swift
 )
