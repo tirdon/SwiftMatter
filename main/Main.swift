@@ -24,18 +24,21 @@ func main() -> Never {
 
 	rootNode.addEndpoint(switchEndpoint)
 
+	if esp_matter.client.init_client_callbacks_shim() != ESP_OK {
+		fatalError("Failed to initialize Matter client callbacks")
+	}
+
 	let app = Matter.Application()
 	app.rootNode = rootNode
 	app.start()
 
-	sleep(3)
+	// Wait for Matter platform layer (including system clock) to fully initialize
+	while !esp_matter.is_started() {
+		vTaskDelay(msToTicks(100))
+	}
 
 	button.start()
 	ir.start()
-
-	if esp_matter.client.init_client_callbacks_shim() != ESP_OK {
-		fatalError("Failed to initialize Matter client callbacks")
-	}
 
 	while true { sleep(1) }
 }

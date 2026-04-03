@@ -231,7 +231,7 @@ void send_command_success_callback(void *context,
                                    const chip::app::ConcreteCommandPath &path,
                                    const chip::app::StatusIB &status,
                                    chip::TLV::TLVReader *response_data) {
-  printf("[LIGHT] Command sent: cluster=0x%" PRIx32 ", command=0x%" PRIx32 "\n",
+  printf("[LIGHT] Command OK: cluster=0x%" PRIx32 " cmd=0x%" PRIx32 "\n",
          path.mClusterId, path.mCommandId);
 }
 
@@ -246,25 +246,34 @@ public:
   void OnAttributeData(const chip::app::ConcreteDataAttributePath &path,
                        chip::TLV::TLVReader *data,
                        const chip::app::StatusIB &status) override {
-    if (!data)
+    if (!data) {
+      printf("[LIGHT] No data\n");
       return;
-    if (path.mClusterId != chip::app::Clusters::OnOff::Id)
+    }
+    if (path.mClusterId != chip::app::Clusters::OnOff::Id) {
+      printf("[LIGHT] Invalid cluster ID\n");
       return;
-    if (path.mAttributeId != chip::app::Clusters::OnOff::Attributes::OnOff::Id)
+    }
+    if (path.mAttributeId !=
+        chip::app::Clusters::OnOff::Attributes::OnOff::Id) {
+      printf("[LIGHT] Invalid attribute ID\n");
       return;
+    }
 
     bool val = false;
     if (data->Get(val) == CHIP_NO_ERROR) {
+      printf("[LIGHT] Bound device OnOff state: %s\n", val ? "ON" : "OFF");
       update_local_led_shim(val);
     }
   }
 
   void OnError(CHIP_ERROR error) override {
-    printf("[LIGHT] OnOff subscription error\n");
+    printf("[LIGHT] OnOff read/subscribe error: %" CHIP_ERROR_FORMAT "\n",
+           error.Format());
   }
 
   void OnDone(chip::app::ReadClient *client) override {
-    printf("[LIGHT] OnOff subscription ended\n");
+    printf("[LIGHT] OnOff read/subscribe ended\n");
   }
 
   void OnSubscriptionEstablished(chip::SubscriptionId id) override {
@@ -277,6 +286,7 @@ static OnOffReadCallback sOnOffReadCallback;
 void on_server_update(esp_matter::client::peer_device_t *peer_device,
                       esp_matter::client::request_handle_t *req_handle,
                       void *priv_data) {
+  printf("[LIGHT] on_server_update\n");
   if (!peer_device || !req_handle) {
     printf("[LIGHT] Invalid peer_device or req_handle\n");
     return;
@@ -295,13 +305,19 @@ void on_server_update(esp_matter::client::peer_device_t *peer_device,
         nullptr, peer_device, req_handle->command_path, "{}",
         send_command_success_callback, send_command_failure_callback,
         chip::NullOptional, chip::NullOptional);
+
+    // After sending the command, read back the bound device's OnOff state
+    chip::app::AttributePathParams readPath(
+        req_handle->command_path.mEndpointId, chip::app::Clusters::OnOff::Id,
+        chip::app::Clusters::OnOff::Attributes::OnOff::Id);
+    esp_matter::client::interaction::read::send_request(
+        peer_device, &readPath, 1, nullptr, 0, sOnOffReadCallback);
     return;
   }
 
-  // The Matter binding client can also issue READ_ATTR requests to sync the
-  // current on/off state from a bound device (e.g. after reconnection).
-  // OnOffReadCallback::OnAttributeData() calls update_local_led_shim() to
-  // keep the local LED in sync with the remote device's actual state.
+  // READ_ATTR: sync the current on/off state from a bound device (e.g. after
+  // reconnection). OnOffReadCallback::OnAttributeData() calls
+  // update_local_led_shim() to keep the local LED in sync.
   if (req_handle->type == esp_matter::client::READ_ATTR) {
     if (!is_onoff_attribute_path(req_handle->attribute_path)) {
       return;
@@ -313,7 +329,8 @@ void on_server_update(esp_matter::client::peer_device_t *peer_device,
     return;
   }
 
-  // To get notified on every remote attribute change
+  /*
+  // SUBSCRIBE_ATTR: get notified on every remote attribute change
   if (req_handle->type != esp_matter::client::SUBSCRIBE_ATTR) {
     return;
   }
@@ -326,6 +343,7 @@ void on_server_update(esp_matter::client::peer_device_t *peer_device,
       peer_device, &req_handle->attribute_path, 1, nullptr, 0,
       kMinSubscribeIntervalSeconds, kMaxSubscribeIntervalSeconds, true, true,
       sOnOffReadCallback);
+  */
 }
 
 void on_group_request(uint8_t fabric_index,
@@ -345,7 +363,6 @@ void on_group_request(uint8_t fabric_index,
 }
 
 // SPI master shims
-
 esp_err_t spi_bus_init_shim(int32_t host, int32_t mosi_pin, int32_t miso_pin,
                             int32_t sclk_pin, int32_t max_transfer_sz) {
   spi_bus_config_t bus_cfg = {};
