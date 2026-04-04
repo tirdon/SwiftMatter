@@ -22,6 +22,23 @@
 #include <esp_system.h>
 #include <inttypes.h>
 
+#include <esp_openthread_types.h>
+#include <platform/ESP32/OpenthreadLauncher.h>
+
+// OpenThread platform config for ESP32-C6 native 802.15.4 radio.
+// Must be static — set_openthread_platform_config stores the pointer.
+static esp_openthread_platform_config_t s_ot_config = {
+    .radio_config = { .radio_mode = RADIO_MODE_NATIVE },
+    .host_config = { .host_connection_mode = HOST_CONNECTION_MODE_NONE },
+    .port_config = { .storage_partition_name = "nvs",
+                     .netif_queue_size = 10,
+                     .task_queue_size = 10 },
+};
+
+void set_openthread_platform_config_native_shim() {
+    set_openthread_platform_config(&s_ot_config);
+}
+
 esp_err_t esp_matter::attribute::set_callback_shim(callback_t_shim callback) {
   return set_callback((callback_t)callback);
 }

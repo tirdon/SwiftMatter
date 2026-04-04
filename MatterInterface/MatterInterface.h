@@ -79,6 +79,8 @@ esp_err_t spi_transfer_shim(void *handle, const uint8_t *tx_data,
 esp_err_t spi_remove_device_shim(void *handle);
 esp_err_t spi_bus_free_shim(int32_t host);
 
+void set_openthread_platform_config_native_shim();
+
 void on_server_update(esp_matter::client::peer_device_t *peer_device,
                       esp_matter::client::request_handle_t *req_handle,
                       void *priv_data);
