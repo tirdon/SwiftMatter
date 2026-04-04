@@ -277,4 +277,4 @@ For periodic polling, call `spi.start()` to launch a background FreeRTOS task. U
 
 ## License
 
-This project is released under the [Creative Commons Zero (CC0 1.0 Universal)](https://creativecommons.org/publicdomain/zero/1.0/) license.
+This project is released under the [] license.
