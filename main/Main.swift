@@ -31,7 +31,7 @@ func main() -> Never {
 	// Configure OpenThread for ESP32-C6 native 802.15.4 radio.
 	// Must be called before esp_matter::start() so the Matter stack
 	// can initialise the OpenThread platform layer.
-	set_openthread_platform_config_native_shim()
+	// set_openthread_platform_config_native_shim()
 
 	let app = Matter.Application()
 	app.rootNode = rootNode
