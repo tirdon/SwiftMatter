@@ -87,6 +87,7 @@ target_sources(${COMPONENT_LIB}
     ../MatterInterface/Matter.swift
     ../MatterInterface/Matter+Application.swift
     ../MatterInterface/Matter+SwitchEndpoint.swift
+    ../MatterInterface/Matter+ThreadBorderRouterEndpoint.swift
     ../MatterInterface/Matter+OnBoardLED.swift
     ../MatterInterface/Core.swift
     ../MatterInterface/Core+ID.swift

@@ -49,10 +49,6 @@ extension Matter {
                         print("WiFi disconnected")
                     }
 
-                case Int(chip.DeviceLayer.DeviceEventType.kBindingsChangedViaCluster.rawValue):
-                    print("Binding entry changed — subscribing to bound devices")
-                    subscribe_to_bound_devices_shim()
-
                 default:
                     break
                 }
