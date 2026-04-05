@@ -51,7 +51,9 @@ namespace client {
 esp_err_t cluster_update_shim(uint16_t endpoint_id, request_handle_t *req);
 
 esp_err_t init_client_callbacks_shim();
-void subscribe_to_bound_devices_shim(uint16_t endpoint_id);
+void subscribe_to_bound_device_shim(uint16_t remote_endpoint_id,
+                                     uint64_t node_id, uint8_t fabric_index);
+void print_bindings_shim(uint16_t endpoint_id);
 } // namespace client
 } // namespace esp_matter
 

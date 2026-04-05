@@ -168,42 +168,6 @@ esp_err_t esp_matter::client::init_client_callbacks_shim() {
   return set_request_callback(on_server_update, on_group_request, nullptr);
 }
 
-/*
-void subscribe_to_bound_devices_shim(uint16_t endpoint_id) {
-  if (!esp_matter::is_started()) {
-    printf("[TBR] Skipping subscriptions for endpoint %d before Matter start\n",
-           endpoint_id);
-    return;
-  }
-
-  esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
-  auto &bindingTable = chip::app::Clusters::Binding::Table::GetInstance();
-  for (const auto &entry : bindingTable) {
-    if (entry.local != endpoint_id) {
-      continue;
-    }
-    if (entry.type != chip::app::Clusters::Binding::MATTER_UNICAST_BINDING) {
-      continue;
-    }
-    if (!entry.clusterId.has_value() ||
-        entry.clusterId.value() != chip::app::Clusters::OnOff::Id) {
-      continue;
-    }
-
-    esp_matter::client::request_handle_t req_handle;
-    req_handle.type = esp_matter::client::SUBSCRIBE_ATTR;
-    req_handle.attribute_path = chip::app::AttributePathParams(
-        entry.remote, chip::app::Clusters::OnOff::Id,
-        chip::app::Clusters::OnOff::Attributes::OnOff::Id);
-
-    esp_matter::client::connect(
-        chip::Server::GetInstance().GetCASESessionManager(), entry.fabricIndex,
-        entry.nodeId, &req_handle);
-    printf("[TBR] Subscribing to 0x%" PRIx64 " (Endpoint %d)\n", entry.nodeId,
-           entry.remote);
-  }
-}
-
 void print_bindings_shim(uint16_t endpoint_id) {
   if (!esp_matter::is_started()) {
     printf("[TBR] Cannot print bindings before Matter start\n");
@@ -226,7 +190,6 @@ void print_bindings_shim(uint16_t endpoint_id) {
     }
   }
 }
-*/
 
 } // extern "C"
 
@@ -325,12 +288,6 @@ void on_server_update(esp_matter::client::peer_device_t *peer_device,
         send_command_success_callback, send_command_failure_callback,
         chip::NullOptional, chip::NullOptional);
 
-    // After sending the command, read back the bound device's OnOff state
-    chip::app::AttributePathParams readPath(
-        req_handle->command_path.mEndpointId, chip::app::Clusters::OnOff::Id,
-        chip::app::Clusters::OnOff::Attributes::OnOff::Id);
-    esp_matter::client::interaction::read::send_request(
-        peer_device, &readPath, 1, nullptr, 0, sOnOffReadCallback);
     return;
   }
 
@@ -348,21 +305,17 @@ void on_server_update(esp_matter::client::peer_device_t *peer_device,
     return;
   }
 
-  /*
-  // SUBSCRIBE_ATTR: get notified on every remote attribute change
-  if (req_handle->type != esp_matter::client::SUBSCRIBE_ATTR) {
+  if (req_handle->type == esp_matter::client::SUBSCRIBE_ATTR) {
+    if (!is_onoff_attribute_path(req_handle->attribute_path)) {
+      return;
+    }
+
+    esp_matter::client::interaction::subscribe::send_request(
+        peer_device, &req_handle->attribute_path, 1, nullptr, 0,
+        kMinSubscribeIntervalSeconds, kMaxSubscribeIntervalSeconds, true, true,
+        sOnOffReadCallback);
     return;
   }
-
-  if (!is_onoff_attribute_path(req_handle->attribute_path)) {
-    return;
-  }
-
-  esp_matter::client::interaction::subscribe::send_request(
-      peer_device, &req_handle->attribute_path, 1, nullptr, 0,
-      kMinSubscribeIntervalSeconds, kMaxSubscribeIntervalSeconds, true, true,
-      sOnOffReadCallback);
-  */
 }
 
 void on_group_request(uint8_t fabric_index,
@@ -379,6 +332,28 @@ void on_group_request(uint8_t fabric_index,
   esp_matter::client::interaction::invoke::send_group_request(
       fabric_index, req_handle->command_path, "{}");
   printf("[LIGHT] Group toggle sent\n");
+}
+
+extern "C" void subscribe_to_bound_device_shim(uint16_t remote_endpoint_id,
+                                                uint64_t node_id,
+                                                uint8_t fabric_index) {
+  if (!esp_matter::is_started()) {
+    printf("[TBR] Skipping subscription before Matter start\n");
+    return;
+  }
+
+  esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
+  esp_matter::client::request_handle_t req;
+  req.type = esp_matter::client::SUBSCRIBE_ATTR;
+  req.attribute_path = chip::app::AttributePathParams(
+      remote_endpoint_id, chip::app::Clusters::OnOff::Id,
+      chip::app::Clusters::OnOff::Attributes::OnOff::Id);
+
+  esp_matter::client::connect(
+      chip::Server::GetInstance().GetCASESessionManager(), fabric_index,
+      node_id, &req);
+  printf("[TBR] Subscribing to 0x%" PRIx64 " (Endpoint %d)\n", node_id,
+         remote_endpoint_id);
 }
 
 // SPI master shims
