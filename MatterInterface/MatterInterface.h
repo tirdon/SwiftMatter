@@ -9,13 +9,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-// GNU C++ interfaces do not work well with Swift for certain types, so let's
-// use some simple C++ shims. For example, uint32_t gets imported as UInt and
-// not CUnsignedLong (as defined in ESP IDF).
-
 #include "esp_err.h"
 #include "esp_matter_attribute_utils.h"
 #include "esp_matter_data_model.h"
+
 namespace esp_matter {
 namespace attribute {
 typedef esp_err_t (*callback_t_shim)(callback_type_t type, uint16_t endpoint_id,
@@ -48,31 +45,39 @@ namespace esp_matter {
 namespace attribute {
 esp_err_t update_shim(uint16_t endpoint_id, unsigned int cluster_id,
                       unsigned int attribute_id, esp_matter_attr_val_t *val);
-}
+} // namespace attribute
+
+namespace client {
+esp_err_t cluster_update_shim(uint16_t endpoint_id, request_handle_t *req);
+
+esp_err_t init_client_callbacks_shim();
+void subscribe_to_bound_device_shim(uint16_t remote_endpoint_id,
+                                     uint64_t node_id, uint8_t fabric_index);
+void print_bindings_shim(uint16_t endpoint_id);
+} // namespace client
 } // namespace esp_matter
 
-#ifdef __cplusplus
-}
-#endif
+void update_local_led_shim(bool state);
 
-// Recomissioning causes failures with reference semantics so this is done as a
-// function implemented in C++. Ideally this would be done by changing some of
-// the headers in ESP Matter to have proper Swift annotations.
+void printStationIP();
+void printFabricInfo();
 void recomissionFabric();
-
-// FreeRTOS task notification shims (macros not visible to Swift)
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 uint32_t ulTaskNotifyTake_shim(int32_t xClearCountOnExit,
                                uint32_t xTicksToWait);
 void vTaskNotifyGiveFromISR_shim(TaskHandle_t xTaskToNotify,
                                  int32_t *pxHigherPriorityTaskWoken);
 void portYIELD_FROM_ISR_shim(int32_t xHigherPriorityTaskWoken);
+void xTaskNotifyGive_shim(TaskHandle_t xTaskToNotify);
+
+void on_server_update(esp_matter::client::peer_device_t *peer_device,
+                      esp_matter::client::request_handle_t *req_handle,
+                      void *priv_data);
+
+void on_group_request(uint8_t fabric_index,
+                      esp_matter::client::request_handle_t *req_handle,
+                      void *priv_data);
 
 #ifdef __cplusplus
 }
 #endif
-
-void printFabricInfo();

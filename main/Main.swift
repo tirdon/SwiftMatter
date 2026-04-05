@@ -1,66 +1,58 @@
+//MARK: - Entrypoint
+
+var globalLED: LED!
+
+@_cdecl("update_local_led_shim")
+func updateLocalLED(state: Bool) {
+    globalLED?.enabled = state
+}
+
 @_cdecl("app_main")
 func main() -> Never {
 
-	print("Hello! Embedded Swift is running!")
+    print("Hello! Embedded Swift is running!")
 
-	let led = LED()
+    globalLED = LED()
 
-	let rootNode = Matter.Node(name: "Irrigation ")
-	rootNode.identifyHandler = { print("identify") }
+    let rootNode = Matter.Node(name: "Irrigation Controller")
+    rootNode.identifyHandler = { print("identify") }
 
-	let switchEndpoint = Matter.SwitchEndpoint(rootNode: rootNode)
+    let switchEndpoint = Matter.SwitchClientEndpoint(rootNode: rootNode)
 
-	switchEndpoint.eventHandler = { event in
-		guard event.type == .didSet else { return }
-		switch event.attribute {
-		case .onOff:
-			led.enabled = (event.value != 0)
-			print("Switch is now \(led.enabled ? "ON" : "OFF")")
-		case .unknown(let id): print("unknown attribute id: \(id)")
-		}
-	}
+    // let humidityEndpoint = Matter.DHT22_humidityEndpoint(rootNode: rootNode)
+    // let temperatureEndpoint = Matter.DHT22_tempEndpoint(rootNode: rootNode)
 
-	let humidityEndpoint = Matter.DHT22_humidityEndpoint(rootNode: rootNode)
-	let temperatureEndpoint = Matter.DHT22_tempEndpoint(rootNode: rootNode)
+    let button = Button(endpoint: switchEndpoint.id)
+    // let dht = DHT22Sensor(
+    // 	humidityEndpoint: humidityEndpoint.id, temperatureEndpoint: temperatureEndpoint.id)
+    let ir = IRSensor(endpoint: switchEndpoint.id)
 
-	let button = Button(endpoint: switchEndpoint.id, led: led)
-	let dht = DHT22Sensor(
-		humidityEndpoint: humidityEndpoint.id, temperatureEndpoint: temperatureEndpoint.id)
-	let ir = IRSensor(button: button)
+    rootNode.addEndpoint(switchEndpoint)
+    // rootNode.addEndpoint(humidityEndpoint)
+    // rootNode.addEndpoint(temperatureEndpoint)
 
-	rootNode.addEndpoint(switchEndpoint)
-	rootNode.addEndpoint(humidityEndpoint)
-	rootNode.addEndpoint(temperatureEndpoint)
+    if esp_matter.client.init_client_callbacks_shim() != ESP_OK {
+        fatalError("Failed to initialize Matter client callbacks")
+    }
 
-	let app = Matter.Application()
-	app.rootNode = rootNode
-	app.start()
+    let app = Matter.Application()
+    app.rootNode = rootNode
+    app.start()
 
-	sleep(1)
+    while !esp_matter.is_started() {
+        vTaskDelay(msToTicks(100))
+    }
 
-	xTaskCreate(
-		DHT22Sensor.dht_rx_task, 
-		"dht_rx_task", 
-		4096, 
-		Unmanaged.passRetained(dht).toOpaque(), 
-		5,
-		nil)
+    button.start()
+    ir.start()
 
-	xTaskCreate(
-		IRSensor.ir_rx_task, 
-		"ir_rx_task", 
-		4096, 
-		Unmanaged.passRetained(ir).toOpaque(), 
-		3,
-		nil)
+    // xTaskCreate(
+    // 	DHT22Sensor.dht_rx_task,
+    // 	"dht_rx_task",
+    // 	4096,
+    // Unmanaged.passRetained(dht).toOpaque(),
+    // 5,
+    // nil)
 
-	xTaskCreate(
-		Button.button_task, 
-		"button_task", 
-		4096, 
-		Unmanaged.passRetained(button).toOpaque(), 
-		4,
-		nil)
-
-	while true { sleep(1) }
+    while true { sleep(1) }
 }

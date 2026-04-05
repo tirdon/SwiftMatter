@@ -43,7 +43,7 @@
 #include <esp_sleep.h>
 #include <esp_timer.h>
 // #include <esp_sntp.h>
-// #include <esp_netif.h>
+#include <esp_netif.h>
 
 // ESP Matter
 // ==================================================
@@ -66,6 +66,7 @@ extern "C" size_t strnlen(const char *s, size_t maxlen);
 extern "C" char *strdup(const char *s1);
 
 #include <esp_matter.h>
+#include <esp_matter_client.h>
 // #include <esp_matter_ota.h>
 
 // ConnectedHomeIP

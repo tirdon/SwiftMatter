@@ -14,7 +14,7 @@ extension Matter {
                 context: Int
             ) {
                 guard let ptr = UnsafeRawPointer(bitPattern: context) else { return }
-                let led = Unmanaged<Matter.OnBoardLED>.fromOpaque(ptr).takeUnretainedValue()
+                let app = Unmanaged<Matter.Application>.fromOpaque(ptr).takeUnretainedValue()
                 guard let event else { return }
 
                 let eventType = event.pointee.Type
@@ -22,26 +22,38 @@ extension Matter {
                 case chip.DeviceLayer.DeviceEventType.kFabricRemoved:
                     recomissionFabric()
                     print("Fabric removed")
+                    printFabricInfo()
+
+                case chip.DeviceLayer.DeviceEventType.kFabricCommitted:
+                    print("Fabric committed")
+                    printFabricInfo()
+
+                case chip.DeviceLayer.DeviceEventType.kFabricUpdated:
+                    print("Fabric updated")
+                    printFabricInfo()
 
                 case Int(chip.DeviceLayer.DeviceEventType.kWiFiConnectivityChange.rawValue):
                     let result = event.pointee.WiFiConnectivityChange.Result
                     if result == chip.DeviceLayer.kConnectivity_Established {
-                        led.enabled = false
+                        app.led.enabled = false
                         print("WiFi connected")
+                        printStationIP()
                         printFabricInfo()
                     } else if result == chip.DeviceLayer.kConnectivity_Lost {
-                        led.enabled = true
+                        app.led.enabled = true
                         print("WiFi disconnected")
-                        gpio_set_level(LED.pin, 0)
                     }
+
+                case Int(chip.DeviceLayer.DeviceEventType.kBindingsChangedViaCluster.rawValue):
+                    print("Bindings changed")
 
                 default:
                     break
                 }
             }
 
-            let ledOpaque = Int(bitPattern: Unmanaged.passRetained(led).toOpaque())
-            if esp_matter.start(callback, ledOpaque) == ESP_OK {
+            let appOpaque = Int(bitPattern: Unmanaged.passUnretained(self).toOpaque())
+            if esp_matter.start(callback, appOpaque) == ESP_OK {
                 print("Matter started successfully")
             } else {
                 fatalError("Failed to start Matter")

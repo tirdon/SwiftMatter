@@ -1,6 +1,18 @@
+// MARK: - Helpers
+
+func msToTicks(_ ms: UInt32) -> UInt32 {
+    ms * UInt32(configTICK_RATE_HZ) / 1000
+}
+
+private func delayUs(_ us: Int64) {
+    let start = esp_timer_get_time()
+    while (esp_timer_get_time() - start) < us {}
+}
+
 //MARK: - LED
 final class LED: GPIO {
-    static let pin = GPIO_NUM_9
+    static let pin = GPIO_NUM_6
+    private static let ground = GPIO_NUM_10
 
     var enabled: Bool = false {
         didSet {
@@ -10,8 +22,11 @@ final class LED: GPIO {
 
     init() {
         gpio_reset_pin(LED.pin)
+        gpio_reset_pin(LED.ground)
         gpio_set_direction(LED.pin, GPIO_MODE_OUTPUT)
-        gpio_set_level(LED.pin, 0) // Low is OFF
+        gpio_set_direction(LED.ground, GPIO_MODE_OUTPUT)
+        gpio_set_level(LED.pin, 0)  // Low is OFF
+        gpio_set_level(LED.ground, 0)
 
         _ = Unmanaged.passRetained(self)
     }
@@ -20,15 +35,13 @@ final class LED: GPIO {
 //MARK: - Button
 final class Button {
     private static let pin = GPIO_NUM_21
-    private static let debounceMs: UInt32 = 50
-    private static let pollMs: UInt32 = 20
+    private static let pollIntervalMs: UInt32 = 10
+    private static let debounceMs: UInt32 = 30
 
-    let id: UInt16
-    private let led: LED
+    private let id: UInt16
 
-    init(endpoint id: UInt16, led: LED) {
+    init(endpoint id: UInt16) {
         self.id = id
-        self.led = led
 
         gpio_reset_pin(Button.pin)
         gpio_set_direction(Button.pin, GPIO_MODE_INPUT)
@@ -37,36 +50,52 @@ final class Button {
         _ = Unmanaged.passRetained(self)
     }
 
-    func update() {
-        var att_dataType: esp_matter_attr_val_t = esp_matter_bool(!led.enabled)
+    static let buttonTask: @convention(c) (UnsafeMutableRawPointer?) -> Void = { param in
+        guard let param else {
+            vTaskDelete(nil)
+            return
+        }
 
-        _ = esp_matter.attribute.update_shim(
-            UInt16(self.id),
-            UInt32(chip.app.Clusters.OnOff.Id),
-            UInt32(chip.app.Clusters.OnOff.Attributes.OnOff.Id),
-            &att_dataType
+        let button = Unmanaged<Button>.fromOpaque(param).takeUnretainedValue()
+
+        vTaskDelay(msToTicks(5000))
+
+        var lastLevel = gpio_get_level(Button.pin)
+
+        while true {
+            let level = gpio_get_level(Button.pin)
+            if level != lastLevel {
+                vTaskDelay(msToTicks(Button.debounceMs))
+                let settledLevel = gpio_get_level(Button.pin)
+                lastLevel = settledLevel
+
+                if settledLevel == 1 {  // active high
+                    button.handlePress()
+
+                    while gpio_get_level(Button.pin) == 1 {
+                        vTaskDelay(msToTicks(Button.pollIntervalMs))
+                    }
+                    lastLevel = 0
+                }
+            }
+
+            vTaskDelay(msToTicks(Button.pollIntervalMs))
+        }
+    }
+
+    func start() {
+        xTaskCreate(
+            Button.buttonTask,
+            "button_task",
+            8192,
+            Unmanaged.passUnretained(self).toOpaque(),
+            4,
+            nil
         )
     }
 
-    static let button_task: @convention(c) (UnsafeMutableRawPointer?) -> Void = { param in
-        print("Button Task started")
-        guard let param else { return }
-        let button = Unmanaged<Button>.fromOpaque(param).takeRetainedValue()
-        var pressed = false
-
-        while true {
-            let level = gpio_get_level(pin) // high is pressed
-            if level == 1 && !pressed {
-                pressed = true
-                button.update()
-                print("button is pressed.")
-                vTaskDelay(debounceMs * UInt32(configTICK_RATE_HZ) / 1000)
-            } else if level == 0 && pressed {
-                pressed = false
-                vTaskDelay(debounceMs * UInt32(configTICK_RATE_HZ) / 1000)
-            }
-            vTaskDelay(pollMs * UInt32(configTICK_RATE_HZ) / 1000)
-        }
+    private func handlePress() {
+        send_command(to: self.id, with: chip.app.Clusters.OnOff.Commands.Toggle.Id)
     }
 }
 //MARK: - DHT22
@@ -98,11 +127,6 @@ final class DHT22Sensor {
         gpio_set_level(gpio, 1)
 
         _ = Unmanaged.passRetained(self)
-    }
-
-    private func delayUs(_ us: Int64) {
-        let start = esp_timer_get_time()
-        while (esp_timer_get_time() - start) < us {}
     }
 
     /// Wait for pin to reach expected level. Returns wait duration in microseconds, or -1 on timeout.
@@ -201,9 +225,11 @@ final class DHT22Sensor {
                 }
             }
             if updateCount < 5 {
-                vTaskDelay(500 * UInt32(configTICK_RATE_HZ) / 1000)
+                vTaskDelay(msToTicks(500))
                 updateCount += 1
-            } else { vTaskDelay(readIntervalMs * UInt32(configTICK_RATE_HZ) / 1000) }
+            } else {
+                vTaskDelay(msToTicks(readIntervalMs))
+            }
         }
     }
 
@@ -267,10 +293,8 @@ final class IRSensor {
     /// Debounce delay in milliseconds after decoding.
     private static let debounceMs: UInt32 = 1_000
 
-    private let gpio: gpio_num_t = GPIO_NUM_0
+    private let gpio: gpio_num_t = GPIO_NUM_2
     var taskHandle: TaskHandle_t? = nil
-
-    let button: Button
 
     // GPIO ISR: fires on falling edge, notifies the IR task
     private static let gpioISR: gpio_isr_t = { arg in
@@ -285,8 +309,10 @@ final class IRSensor {
         portYIELD_FROM_ISR_shim(xHigherPriorityTaskWoken)
     }
 
-    init(button: Button) {
-        self.button = button
+    private let id: UInt16
+
+    init(endpoint id: UInt16) {
+        self.id = id
         gpio_reset_pin(gpio)
         gpio_set_direction(gpio, GPIO_MODE_INPUT)
         gpio_pullup_en(gpio)
@@ -299,28 +325,16 @@ final class IRSensor {
         _ = Unmanaged.passRetained(self)
     }
 
-    private func update_button(onOff: Bool) {
-        var att_dataType: esp_matter_attr_val_t = esp_matter_bool(onOff)
-
-        let err = esp_matter.attribute.update_shim(
-            UInt16(self.button.id),
-            UInt32(chip.app.Clusters.OnOff.Id),
-            UInt32(chip.app.Clusters.OnOff.Attributes.OnOff.Id),
-            &att_dataType
-        )
-        if err != ESP_OK { print("IR update_button failed: \(err)") }
-    }
-
     private func handleCommand(frame: UInt32, isRepeat: Bool = false) {
         let command = UInt8((frame >> 16) & 0xFF)
 
         switch command {
         case Command.powerOff:
-            self.update_button(onOff: false)
+            send_command(to: self.id, with: chip.app.Clusters.OnOff.Commands.Off.Id)
         case Command.powerOn:
-            self.update_button(onOff: true)
+            send_command(to: self.id, with: chip.app.Clusters.OnOff.Commands.On.Id)
         default:
-            print("Unknown IR command: \(String(command, radix: 16))")
+            print("Unknown command: \(command)")
             break
         }
     }
@@ -375,7 +389,7 @@ final class IRSensor {
         print("IR Task started")
 
         guard let param else { return }
-        let ir = Unmanaged<IRSensor>.fromOpaque(param).takeRetainedValue()
+        let ir = Unmanaged<IRSensor>.fromOpaque(param).takeUnretainedValue()
 
         ir.taskHandle = xTaskGetCurrentTaskHandle()
 
@@ -385,46 +399,53 @@ final class IRSensor {
         gpio_intr_enable(ir.gpio)
 
         while true {
-            let notified = ulTaskNotifyTake_shim(
-                1, notifyTimeoutMs * UInt32(configTICK_RATE_HZ) / 1000)
+            let notified = ulTaskNotifyTake_shim(1, msToTicks(notifyTimeoutMs))
+
+            var shouldDebounce = false
 
             if notified == 0 {
                 lastFrame = nil
-                gpio_intr_enable(ir.gpio)
-                continue
-            }
+            } else if let result = decodeNecFrame(gpio: ir.gpio) {
+                let now = esp_timer_get_time()
 
-            guard let result = decodeNecFrame(gpio: ir.gpio) else {
-                gpio_intr_enable(ir.gpio)
-                continue
-            }
+                switch result {
+                case .frame(let frame):
+                    if isValidNec(frame) {
+                        lastFrame = frame
+                        lastSignalTime = now
+                        ir.handleCommand(frame: frame)
+                        shouldDebounce = true
+                    }
 
-            let now = esp_timer_get_time()
-
-            switch result {
-            case .frame(let frame):
-                guard isValidNec(frame) else {
-                    gpio_intr_enable(ir.gpio)
-                    continue
-                }
-                lastFrame = frame
-                lastSignalTime = now
-                ir.handleCommand(frame: frame)
-
-            case .repeatCode:
-                if let frame = lastFrame,
-                    (now - lastSignalTime) < repeatTimeoutUs
-                {
-                    lastSignalTime = now
-                    ir.handleCommand(frame: frame, isRepeat: true)
-                } else {
-                    lastFrame = nil
+                case .repeatCode:
+                    if let frame = lastFrame,
+                        (now - lastSignalTime) < repeatTimeoutUs
+                    {
+                        lastSignalTime = now
+                        ir.handleCommand(frame: frame, isRepeat: true)
+                        shouldDebounce = true
+                    } else {
+                        lastFrame = nil
+                    }
                 }
             }
 
-            vTaskDelay(debounceMs * UInt32(configTICK_RATE_HZ) / 1000)
+            if shouldDebounce {
+                vTaskDelay(msToTicks(debounceMs))
+            }
             gpio_intr_enable(ir.gpio)
         }
+    }
+
+    func start() {
+        xTaskCreate(
+            IRSensor.ir_rx_task,
+            "ir_rx_task",
+            4096,
+            Unmanaged.passUnretained(self).toOpaque(),
+            3,
+            nil
+        )
     }
 }
 
@@ -549,7 +570,7 @@ final class DS18B20Sensor {
         writeByte(ROM.skip)
         writeByte(ROM.convertT)
 
-        vTaskDelay(DS18B20Sensor.conversionMs * UInt32(configTICK_RATE_HZ) / 1000)
+        vTaskDelay(msToTicks(DS18B20Sensor.conversionMs))
 
         if !reset() { return nil }
         writeByte(ROM.skip)
@@ -583,7 +604,7 @@ final class DS18B20Sensor {
                     sensor.update_temp()
                 }
             }
-            vTaskDelay(readIntervalMs * UInt32(configTICK_RATE_HZ) / 1000)
+            vTaskDelay(msToTicks(readIntervalMs))
         }
     }
 
@@ -646,7 +667,7 @@ final class MakerSoilMoistureSensor {
                 sensor.updateMoisture()
             }
 
-            vTaskDelay(readIntervalMs * UInt32(configTICK_RATE_HZ) / 1000)
+            vTaskDelay(msToTicks(readIntervalMs))
         }
     }
 
