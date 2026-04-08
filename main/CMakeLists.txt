@@ -1,6 +1,7 @@
 # Register the app as an IDF component
 idf_component_register(
     SRCS "../MatterInterface/MatterInterface.cpp"
+         "../MatterInterface/MatterBindings.cpp"
     PRIV_INCLUDE_DIRS "."
     LDFRAGMENTS "linker.lf"
 )

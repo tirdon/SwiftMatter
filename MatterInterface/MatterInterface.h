@@ -53,6 +53,8 @@ esp_err_t cluster_update_shim(uint16_t endpoint_id, request_handle_t *req);
 esp_err_t init_client_callbacks_shim();
 void subscribe_to_bound_device_shim(uint16_t remote_endpoint_id,
                                      uint64_t node_id, uint8_t fabric_index);
+void subscribe_to_all_bound_devices_shim(uint16_t local_endpoint_id);
+void read_bound_device_onoff_shim(uint16_t local_endpoint_id);
 void print_bindings_shim(uint16_t endpoint_id);
 } // namespace client
 } // namespace esp_matter
@@ -61,7 +63,7 @@ void update_local_led_shim(bool state);
 
 void printStationIP();
 void printFabricInfo();
-void recomissionFabric();
+void recommissionFabric();
 
 uint32_t ulTaskNotifyTake_shim(int32_t xClearCountOnExit,
                                uint32_t xTicksToWait);
@@ -81,7 +83,7 @@ esp_err_t spi_transfer_shim(void *handle, const uint8_t *tx_data,
 esp_err_t spi_remove_device_shim(void *handle);
 esp_err_t spi_bus_free_shim(int32_t host);
 
-void set_openthread_platform_config_native_shim();
+// void set_openthread_platform_config_native_shim();
 
 void on_server_update(esp_matter::client::peer_device_t *peer_device,
                       esp_matter::client::request_handle_t *req_handle,

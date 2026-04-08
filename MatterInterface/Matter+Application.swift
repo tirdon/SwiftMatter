@@ -4,6 +4,7 @@
 extension Matter {
     final class Application {
         var rootNode: Matter.Node? = nil
+        var switchEndpointId: UInt16 = 1
         let led = Matter.OnBoardLED()
 
         init() { _ = Unmanaged.passRetained(self) }
@@ -20,7 +21,7 @@ extension Matter {
                 let eventType = event.pointee.Type
                 switch Int(eventType) {
                 case chip.DeviceLayer.DeviceEventType.kFabricRemoved:
-                    recomissionFabric()
+                    recommissionFabric()
                     print("Fabric removed")
                     printFabricInfo()
 
@@ -46,6 +47,10 @@ extension Matter {
 
                 case Int(chip.DeviceLayer.DeviceEventType.kBindingsChangedViaCluster.rawValue):
                     print("Bindings changed")
+                    // Auto-subscribe to all bound devices for live attribute updates.
+                    // Endpoint 1 is the SwitchClientEndpoint created in app_main.
+                    esp_matter.client.subscribe_to_all_bound_devices_shim(app.switchEndpointId)
+                    esp_matter.client.print_bindings_shim(app.switchEndpointId)
 
                 default:
                     break
