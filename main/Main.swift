@@ -46,9 +46,5 @@ func main() -> Never {
 	button.start()
 	ir.start()
 
-	// Start periodic attribute polling (reads bound device state every 30s)
-	let poller = AttributePoller(endpoint: switchEndpoint.id, pollIntervalSec: 30)
-	poller.start()
-
 	while true { sleep(1) }
 }

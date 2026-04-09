@@ -4,8 +4,8 @@
 //MARK: - LED
 
 final class LED: GPIO {
-    static let pin = GPIO_NUM_22
-    private static let groundPin = GPIO_NUM_16
+    static let pin = GPIO_NUM_3
+    private static let groundPin = GPIO_NUM_2
     var enabled: Bool = false {
         didSet {
             gpio_set_level(LED.pin, enabled ? 1 : 0)
@@ -27,7 +27,7 @@ final class LED: GPIO {
 //MARK: - Button
 
 final class Button {
-    private static let pin = GPIO_NUM_1
+    private static let pin = GPIO_NUM_18
     private static let pollIntervalMs: UInt32 = 10
     private static let debounceMs: UInt32 = 30
 
@@ -65,6 +65,7 @@ final class Button {
                 lastLevel = settledLevel
 
                 if settledLevel == 0 {
+                    print("Button pressed")
                     button.handlePress()
 
                     while gpio_get_level(Button.pin) == 0 {
@@ -82,7 +83,7 @@ final class Button {
         xTaskCreate(
             Button.buttonTask,
             "button_task",
-            8192,
+            4096,
             Unmanaged.passUnretained(self).toOpaque(),
             4,
             nil

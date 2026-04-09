@@ -84,7 +84,6 @@ target_sources(${COMPONENT_LIB}
     PRIVATE
     Main.swift
     Helpers.swift
-    AttributePoller.swift
     PhysicalDevices.swift
     SPI.swift
     SwitchEndpoint.swift

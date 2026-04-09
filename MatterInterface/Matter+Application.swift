@@ -40,6 +40,8 @@ extension Matter {
                         print("WiFi connected")
                         printStationIP()
                         printFabricInfo()
+                        // Subscribe to all existing bound devices on (re)connect
+                        esp_matter.client.subscribe_to_all_bound_devices_shim(app.switchEndpointId)
                     } else if result == chip.DeviceLayer.kConnectivity_Lost {
                         app.led.enabled = true
                         print("WiFi disconnected")

@@ -54,7 +54,6 @@ esp_err_t init_client_callbacks_shim();
 void subscribe_to_bound_device_shim(uint16_t remote_endpoint_id,
                                      uint64_t node_id, uint8_t fabric_index);
 void subscribe_to_all_bound_devices_shim(uint16_t local_endpoint_id);
-void read_bound_device_onoff_shim(uint16_t local_endpoint_id);
 void print_bindings_shim(uint16_t endpoint_id);
 } // namespace client
 } // namespace esp_matter

@@ -7,14 +7,14 @@ extension Matter {
 
         var enabled: Bool = true {
             didSet {
-                gpio_set_level(OnBoardLED.pin, enabled ? 0 : 1)
+                gpio_set_level(OnBoardLED.pin, enabled ? 1 : 0)
             }
         }
 
         init() {
             gpio_reset_pin(OnBoardLED.pin)
             gpio_set_direction(OnBoardLED.pin, GPIO_MODE_OUTPUT)
-            gpio_set_level(OnBoardLED.pin, 0)
+            self.enabled = false
         }
     }
 }
